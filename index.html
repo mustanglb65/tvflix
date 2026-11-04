@@ -8,7 +8,13 @@
 </head>
 <body>
 <div id="app">
-  <div id="topbar"><span class="logo">Shatila Family Flixer</span><span id="status"></span></div>
+  <div id="topbar"><span class="logo">Shatila Family Flixer</span><span id="status"></span><div id="searchbtn" class="sbtn">&#128269; Search</div></div>
+
+  <div id="search" class="hidden">
+    <div id="search-title">Search movies &amp; shows</div>
+    <input id="search-input" type="text" placeholder="Type a title, then press Enter / Done" autocomplete="off">
+    <div id="search-hint">Press Back to cancel</div>
+  </div>
   <div id="rows"><div id="rows-inner"></div></div>
 
   <div id="detail" class="hidden">

@@ -208,7 +208,101 @@
     updateFocus();
   }
 
+  var homeRows = null; /* the normal catalog, saved while search results are shown */
+
+  function openSearch() {
+    var inp = $('search-input');
+    inp.value = '';
+    $('search').className = '';
+    view = 'search';
+    setTimeout(function () { inp.focus(); }, 50);
+  }
+
+  function closeSearch() {
+    $('search-input').blur();
+    $('search').className = 'hidden';
+    view = 'home';
+  }
+
+  function leaveResults() {
+    if (!homeRows) { return false; }
+    rows = homeRows;
+    homeRows = null;
+    setStatus('');
+    render();
+    return true;
+  }
+
+  function doSearch(raw) {
+    var q = String(raw || '').replace(/[^\w\s'&\-]/g, ' ').replace(/\s+/g, ' ').trim();
+    closeSearch();
+    if (!q) { return; }
+    setStatus('Searching...');
+    var out = [null, null], pending = 2;
+    var hideRe = null;
+    var finish = function () {
+      if (--pending > 0) { return; }
+      var found = [];
+      if (out[0] && out[0].length) { found.push({ title: 'Results for "' + q + '"', items: out[0] }); }
+      if (out[1] && out[1].length) { found.push({ title: 'Free to Watch: "' + q + '"', items: out[1] }); }
+      if (!found.length) { setStatus('No results for "' + q + '"'); return; }
+      if (!homeRows) { homeRows = rows; }
+      rows = found;
+      setStatus('Search: ' + q + '  (Back to return)');
+      render();
+    };
+    get('catalog.json', function (e0, cat) {
+      var hide = (!e0 && cat && cat.hide) || [];
+      if (hide.length) { hideRe = new RegExp('\\b(' + hide.join('|') + ')', 'i'); }
+      var bad = function (it) { return hideRe && hideRe.test(it.title + ' ' + (it.description || '')); };
+
+      if (!TMDB_KEY) { out[0] = []; finish(); } else {
+        get(TMDB_API + '/search/multi?api_key=' + TMDB_KEY + '&include_adult=false&language=en-US&query=' +
+          encodeURIComponent(q), function (e, data) {
+          var list = [];
+          if (!e && data && data.results) {
+            data.results.forEach(function (m) {
+              if ((m.media_type !== 'movie' && m.media_type !== 'tv') || !m.poster_path) { return; }
+              var kind = m.media_type;
+              var date = m.release_date || m.first_air_date || '';
+              var bits = [];
+              if (date) { bits.push(date.substring(0, 4)); }
+              if (m.vote_average) { bits.push('★ ' + m.vote_average.toFixed(1)); }
+              bits.push(kind === 'tv' ? 'TV Series' : 'Film');
+              var it = { tmdbId: m.id, kind: kind, title: m.title || m.name, year: date.substring(0, 4),
+                description: m.overview, poster: TMDB_IMG + m.poster_path, meta: bits.join('  ·  ') };
+              if (!bad(it)) { list.push(it); }
+            });
+          }
+          out[0] = list;
+          finish();
+        });
+      }
+
+      var aq = '/advancedsearch.php?q=' + encodeURIComponent('title:(' + q + ') AND mediatype:movies AND ' +
+        '(collection:feature_films OR collection:Film_Noir OR collection:SciFi_Horror OR collection:classic_tv OR ' +
+        'collection:animationandcartoons OR collection:silent_films)') +
+        '&fl[]=identifier&fl[]=title&fl[]=description&fl[]=year&rows=30&sort[]=downloads+desc&output=json';
+      get(ARCHIVE + aq, function (e, data) {
+        var list = [], seen = {};
+        if (!e && data && data.response) {
+          data.response.docs.forEach(function (d) {
+            var it = { id: d.identifier, archive: true, title: clean(d.title), description: clean(d.description),
+              year: d.year ? String(d.year).substring(0, 4) : '', poster: ARCHIVE + '/services/img/' + d.identifier };
+            var k = norm(it.title);
+            if (seen[k] || bad(it)) { return; }
+            seen[k] = true;
+            list.push(it);
+          });
+        }
+        out[1] = list;
+        finish();
+      });
+    });
+  }
+
   function updateFocus() {
+    $('searchbtn').className = 'sbtn' + (focus.r === -1 ? ' focus' : '');
     var rowEls = rowsInner.children;
     for (var r = 0; r < rowEls.length; r++) {
       var track = rowEls[r].querySelector('.track');
@@ -362,6 +456,23 @@
       return;
     }
 
+    if (view === 'search') {
+      /* let the on-screen keyboard / input handle typing; only Enter and Back are ours */
+      if (k === KEY.ENTER) { doSearch($('search-input').value); e.preventDefault(); }
+      else if (k === KEY.BACK || k === KEY.ESC) { closeSearch(); e.preventDefault(); }
+      return;
+    }
+
+    if (focus.r === -1) {
+      if (k === KEY.DOWN && rows.length) { focus.r = 0; }
+      else if (k === KEY.ENTER) { openSearch(); e.preventDefault(); return; }
+      else if (isBack(k)) { if (!leaveResults() && window.tizen && tizen.application) { tizen.application.getCurrentApplication().exit(); } focus.r = Math.max(focus.r, 0); }
+      updateFocus();
+      e.preventDefault();
+      return;
+    }
+    if (k === KEY.UP && focus.r === 0) { focus.r = -1; updateFocus(); e.preventDefault(); return; }
+
     if (!rows.length) { return; }
     if (k === KEY.RIGHT && focus.c < rows[focus.r].items.length - 1) { focus.c++; }
     else if (k === KEY.LEFT && focus.c > 0) { focus.c--; }
@@ -373,6 +484,7 @@
     }
     else if (k === KEY.ENTER) { openDetail(); }
     else if (isBack(k)) {
+      if (leaveResults()) { e.preventDefault(); return; }
       if (window.tizen && tizen.application) { tizen.application.getCurrentApplication().exit(); }
     }
     updateFocus();
