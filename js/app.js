@@ -213,12 +213,35 @@
   function openSearch() {
     var inp = $('search-input');
     inp.value = '';
+    searchCancelled = false;
     $('search').className = '';
     view = 'search';
     setTimeout(function () { inp.focus(); }, 50);
   }
 
+  var searchCancelled = false;
+
+  /* Samsung's on-screen keyboard: "Done" = 65376, "Cancel" = 65385 (it does not send Enter). */
+  (function () {
+    var inp = $('search-input');
+    var go = function (e) {
+      if (view !== 'search') { return; }
+      var k = e.keyCode;
+      if (k === 13 || k === 65376) {
+        e.stopPropagation(); e.preventDefault();
+        doSearch(inp.value);
+      }
+    };
+    inp.addEventListener('keydown', go);
+    inp.addEventListener('keyup', go);
+    /* fires when the keyboard closes after typing, whichever key closed it */
+    inp.addEventListener('change', function () {
+      if (view === 'search' && !searchCancelled && inp.value.replace(/\s/g, '')) { doSearch(inp.value); }
+    });
+  })();
+
   function closeSearch() {
+    searchCancelled = true;
     $('search-input').blur();
     $('search').className = 'hidden';
     view = 'home';
@@ -458,8 +481,8 @@
 
     if (view === 'search') {
       /* let the on-screen keyboard / input handle typing; only Enter and Back are ours */
-      if (k === KEY.ENTER) { doSearch($('search-input').value); e.preventDefault(); }
-      else if (k === KEY.BACK || k === KEY.ESC) { closeSearch(); e.preventDefault(); }
+      if (k === KEY.ENTER || k === 65376) { doSearch($('search-input').value); e.preventDefault(); }
+      else if (k === KEY.BACK || k === KEY.ESC || k === 65385) { closeSearch(); e.preventDefault(); }
       return;
     }
 
