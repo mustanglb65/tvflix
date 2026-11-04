@@ -1,9 +1,9 @@
 {
   "name": "tvflix",
-  "version": "1.1.0",
-  "description": "TVFlix - browse and stream films on Samsung Tizen TVs",
+  "version": "1.2.0",
+  "description": "Shatila Family Flixer - browse and stream films on Samsung Tizen TVs",
   "packageType": "app",
-  "appName": "TVFlix",
+  "appName": "Shatila Family Flixer",
   "appPath": "index.html",
   "keys": ["MediaPlay", "MediaPause", "MediaPlayPause", "MediaStop", "MediaFastForward", "MediaRewind"],
   "main": "index.html"
