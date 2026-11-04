@@ -4,17 +4,16 @@
   var ROW_HEIGHT = 420;
   var CARD_STEP = 254; /* card width + margin */
 
-  var rows = [];            /* [{title, items:[{title, description, poster, id, video}]}] */
+  var rows = [];
   var focus = { r: 0, c: 0 };
-  var view = 'home';        /* home | detail | trailer | player */
+  var view = 'home';
   var current = null;
   var msgTimer = null;
 
   var $ = function (id) { return document.getElementById(id); };
   var rowsInner = $('rows-inner');
-  var video = $('video');
+  var vidcoreFrame = $('vidcore-frame');
 
-  /* ---------- helpers ---------- */
   function get(url, cb) {
     var x = new XMLHttpRequest();
     x.open('GET', url, true);
@@ -35,7 +34,6 @@
 
   function setStatus(t) { $('status').textContent = t || ''; }
 
-  /* ---------- TMDB: nicer posters, descriptions and ratings ---------- */
   var TMDB_KEY = (window.TVFLIX_CONFIG || {}).tmdbKey;
   var COUNTRY = (window.TVFLIX_CONFIG || {}).country || 'US';
   var TMDB_API = 'https://api.themoviedb.org/3';
@@ -89,7 +87,6 @@
     for (var w = 0; w < WORKERS && w < items.length; w++) { work(); }
   }
 
-  /* ---------- loading the catalog ---------- */
   function loadCatalog() {
     setStatus('Loading...');
     get('catalog.json', function (err, cat) {
@@ -163,7 +160,6 @@
     });
   }
 
-  /* ---------- rendering ---------- */
   function render() {
     rowsInner.innerHTML = '';
     rows.forEach(function (row, r) {
@@ -184,12 +180,12 @@
         cap.className = 'cap';
         cap.textContent = it.title;
         card.appendChild(cap);
-        if (it.id || it.video) {
-          var badge = document.createElement('div');
-          badge.className = 'badge';
-          badge.textContent = '▶ FREE';
-          card.appendChild(badge);
-        }
+        
+        var badge = document.createElement('div');
+        badge.className = 'badge';
+        badge.textContent = '▶ STREAM';
+        card.appendChild(badge);
+        
         track.appendChild(card);
       });
       wrap.appendChild(track);
@@ -217,14 +213,11 @@
     rowsInner.style.webkitTransform = rowsInner.style.transform = 'translateY(-' + vOff + 'px)';
   }
 
-  /* ---------- detail ---------- */
-  var detailBtn = 0;        /* index into the visible detail buttons */
-
-  function canPlay(it) { return !!(it && (it.id || it.video)); }
+  var detailBtn = 0;
 
   function visibleButtons() {
     var list = [];
-    if (canPlay(current)) { list.push({ el: $('detail-play'), act: 'play' }); }
+    if (current) { list.push({ el: $('detail-play'), act: 'play' }); }
     if (current && current.trailer) { list.push({ el: $('detail-trailer'), act: 'trailer' }); }
     return list;
   }
@@ -237,45 +230,14 @@
     list.forEach(function (b, i) { b.el.className = 'btn' + (i === detailBtn ? ' focus' : ''); });
   }
 
-  /* the "where to watch" block: free copy note + provider logos grouped by Stream / Rent / Buy */
   function renderWhere(item) {
     var box = $('detail-where');
     box.innerHTML = '';
-    if (!item || !item.tmdbId) { return; }
-    function line(cls, text) {
-      var d = document.createElement('div');
-      d.className = cls;
-      d.textContent = text;
-      box.appendChild(d);
-    }
-    if (item.loading) { line('where-note', 'Checking where to watch...'); return; }
-    if (!item.whereData) { return; }
-    if (item.id) { line('where-free', '▶ A free public-domain copy is available - press Play.'); }
-    var groups = item.whereData.groups;
-    if (!groups.length) {
-      line('where-note', 'Not listed on any streaming service in ' + COUNTRY + '.');
-    }
-    groups.forEach(function (g) {
-      var wrap = document.createElement('div');
-      wrap.className = 'where-group';
-      var label = document.createElement('span');
-      label.className = 'where-label';
-      label.textContent = g.label;
-      wrap.appendChild(label);
-      g.providers.forEach(function (p) {
-        var chip = document.createElement('span');
-        chip.className = 'chip';
-        if (p.logo) {
-          var img = document.createElement('img');
-          img.src = TMDB_LOGO + p.logo;
-          img.alt = '';
-          chip.appendChild(img);
-        }
-        chip.appendChild(document.createTextNode(p.name));
-        wrap.appendChild(chip);
-      });
-      box.appendChild(wrap);
-    });
+    if (!item) { return; }
+    var d = document.createElement('div');
+    d.className = 'where-free';
+    d.textContent = '▶ Ready to stream instantly via VidCore Player (Press Play)';
+    box.appendChild(d);
   }
 
   function openDetail() {
@@ -289,66 +251,20 @@
     updateButtons();
     $('detail').className = '';
     view = 'detail';
-    if (current.tmdbId && !current.checked) { current.checked = true; lookupAvailability(current); }
-  }
-
-  /* streaming availability + trailer (official TMDB endpoints), plus a free public-domain copy if one exists */
-  function lookupAvailability(item) {
-    var pending = item.kind === 'movie' ? 3 : 2;
-    var groups = [];
-    item.loading = true;
-    renderWhere(item);
-
-    function fin() {
-      pending--;
-      if (pending > 0) { return; }
-      item.loading = false;
-      item.whereData = { groups: groups };
-      if (current === item) { renderWhere(item); updateButtons(); }
-    }
-
-    var base = TMDB_API + '/' + item.kind + '/' + item.tmdbId;
-
-    get(base + '/watch/providers?api_key=' + TMDB_KEY, function (e, d) {
-      var r = d && d.results && d.results[COUNTRY];
-      if (r) {
-        [['flatrate', 'Stream on'], ['free', 'Free on'], ['ads', 'Free with ads on'],
-         ['rent', 'Rent on'], ['buy', 'Buy on']].forEach(function (g) {
-          if (r[g[0]] && r[g[0]].length) {
-            groups.push({
-              label: g[1],
-              providers: r[g[0]].map(function (p) { return { name: p.provider_name, logo: p.logo_path }; })
-            });
-          }
-        });
-      }
-      fin();
-    });
-
-    get(base + '/videos?api_key=' + TMDB_KEY, function (e, d) {
-      var best = null;
-      if (!e && d && d.results) {
-        d.results.forEach(function (v) {
-          if (v.site !== 'YouTube' || v.type !== 'Trailer') { return; }
-          if (!best || (v.official && !best.official)) { best = v; }
-        });
-      }
-      if (best) { item.trailer = best.key; }
-      fin();
-    });
-
-    if (item.kind === 'movie') {
-      var y = parseInt(item.year, 10);
-      var q = 'title:(' + item.title.replace(/["()\[\]:]/g, ' ') + ') AND mediatype:movies' +
-        (y ? ' AND year:[' + (y - 1) + ' TO ' + (y + 1) + ']' : '');
-      get(ARCHIVE + '/advancedsearch.php?q=' + encodeURIComponent(q) +
-        '&fl[]=identifier&fl[]=title&rows=10&sort[]=downloads+desc&output=json', function (e, d) {
-        if (!e && d && d.response) {
-          for (var i = 0; i < d.response.docs.length; i++) {
-            if (norm(clean(d.response.docs[i].title)) === norm(item.title)) { item.id = d.response.docs[i].identifier; break; }
-          }
+    
+    if (current.tmdbId && !current.checked) {
+      current.checked = true;
+      var base = TMDB_API + '/' + current.kind + '/' + current.tmdbId;
+      get(base + '/videos?api_key=' + TMDB_KEY, function (e, d) {
+        var best = null;
+        if (!e && d && d.results) {
+          d.results.forEach(function (v) {
+            if (v.site !== 'YouTube' || v.type !== 'Trailer') { return; }
+            if (!best || (v.official && !best.official)) { best = v; }
+          });
         }
-        fin();
+        if (best) { current.trailer = best.key; }
+        updateButtons();
       });
     }
   }
@@ -369,7 +285,6 @@
 
   function closeDetail() { $('detail').className = 'hidden'; view = 'home'; }
 
-  /* ---------- player ---------- */
   function showMsg(t, keep) {
     var m = $('player-msg');
     m.textContent = t || '';
@@ -377,54 +292,29 @@
     if (t && !keep) { msgTimer = setTimeout(function () { m.textContent = ''; }, 2000); }
   }
 
-  function resolveVideo(item, cb) {
-    if (item.video) { cb(null, item.video); return; }
-    get(ARCHIVE + '/metadata/' + encodeURIComponent(item.id), function (err, meta) {
-      if (err || !meta || !meta.files) { cb(err || new Error('no files')); return; }
-      var best = null;
-      meta.files.forEach(function (f) {
-        var isMp4 = /\.mp4$/i.test(f.name);
-        if (!isMp4) { return; }
-        if (/h\.?264/i.test(f.format || '')) { if (!best || !best.pref) { best = { f: f, pref: true }; } }
-        else if (!best) { best = { f: f, pref: false }; }
-      });
-      if (!best) { cb(new Error('no playable mp4')); return; }
-      cb(null, ARCHIVE + '/download/' + encodeURIComponent(item.id) + '/' +
-        best.f.name.split('/').map(encodeURIComponent).join('/'));
-    });
-  }
-
   function play() {
     $('player').className = '';
     view = 'player';
-    showMsg('Loading...', true);
-    resolveVideo(current, function (err, url) {
-      if (err) { showMsg('Could not find a playable video for this title.', true); return; }
-      video.src = url;
-      video.play();
-    });
+    var type = (current.kind === 'tv') ? 'tv' : 'movie';
+    var movieId = current.tmdbId || current.id || '';
+    
+    var url = 'https://vidcore.io/' + type + '/' + encodeURIComponent(movieId);
+    if (type === 'tv') {
+      url += '/1/1';
+    }
+    url += '?autoPlay=true';
+
+    vidcoreFrame.src = url;
+    showMsg('Loading VidCore Stream...', true);
   }
 
   function stop() {
-    try { video.pause(); } catch (e) {}
-    video.removeAttribute('src');
-    video.load();
+    vidcoreFrame.src = 'about:blank';
     $('player').className = 'hidden';
     $('detail').className = '';
     view = 'detail';
   }
 
-  video.addEventListener('playing', function () { showMsg(''); });
-  video.addEventListener('waiting', function () { showMsg('Buffering...', true); });
-  video.addEventListener('error', function () { showMsg('Playback error. Try another title.', true); });
-  video.addEventListener('ended', stop);
-  video.addEventListener('timeupdate', function () {
-    if (video.duration) {
-      $('player-progress').style.width = (video.currentTime / video.duration * 100) + '%';
-    }
-  });
-
-  /* ---------- remote control ---------- */
   var KEY = { LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, ENTER: 13, BACK: 10009, ESC: 27, BKSP: 8,
               PLAY: 415, PAUSE: 19, PLAYPAUSE: 10252, STOP: 413, FF: 417, RW: 412 };
 
@@ -434,15 +324,7 @@
     var k = e.keyCode;
 
     if (view === 'player') {
-      if (isBack(k) || k === KEY.STOP) { stop(); }
-      else if (k === KEY.ENTER || k === KEY.PLAYPAUSE) {
-        if (video.paused) { video.play(); showMsg('Play'); } else { video.pause(); showMsg('Paused', true); }
-      }
-      else if (k === KEY.PLAY) { video.play(); showMsg(''); }
-      else if (k === KEY.PAUSE) { video.pause(); showMsg('Paused', true); }
-      else if (k === KEY.RIGHT || k === KEY.FF) { video.currentTime += 30; showMsg('+30s'); }
-      else if (k === KEY.LEFT || k === KEY.RW) { video.currentTime -= 15; showMsg('-15s'); }
-      e.preventDefault();
+      if (isBack(k) || k === KEY.STOP) { stop(); e.preventDefault(); }
       return;
     }
 
@@ -463,7 +345,6 @@
       return;
     }
 
-    /* home */
     if (!rows.length) { return; }
     if (k === KEY.RIGHT && focus.c < rows[focus.r].items.length - 1) { focus.c++; }
     else if (k === KEY.LEFT && focus.c > 0) { focus.c--; }
@@ -481,7 +362,6 @@
     e.preventDefault();
   });
 
-  /* register remote keys on Tizen */
   try {
     if (window.tizen && tizen.tvinputdevice) {
       ['MediaPlay', 'MediaPause', 'MediaPlayPause', 'MediaStop', 'MediaFastForward', 'MediaRewind']

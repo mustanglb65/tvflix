@@ -30,9 +30,11 @@
   </div>
 
   <div id="player" class="hidden">
-    <video id="video"></video>
+    <div class="iframe-container">
+      <iframe id="vidcore-frame" src="about:blank" frameborder="0" allowfullscreen allow="autoplay; encrypted-media; fullscreen"></iframe>
+    </div>
     <div id="player-msg"></div>
-    <div id="player-bar"><div id="player-progress"></div></div>
+    <div id="trailer-hint">Press Back to close</div>
   </div>
 </div>
 <div id="credit">This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming data by JustWatch.</div>
