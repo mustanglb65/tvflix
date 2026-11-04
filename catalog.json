@@ -8,14 +8,14 @@
     { "title": "Popular TV Series", "source": "tmdb", "type": "tv", "path": "/tv/popular" },
     { "title": "Top Rated TV Series", "source": "tmdb", "type": "tv", "path": "/tv/top_rated" },
 
-    { "title": "Free to Watch: Classic Films", "source": "archive", "query": "collection:feature_films AND mediatype:movies" },
-    { "title": "Free to Watch: Comedies", "source": "archive", "query": "collection:feature_films AND subject:comedy AND mediatype:movies" },
-    { "title": "Free to Watch: Westerns", "source": "archive", "query": "collection:feature_films AND subject:western AND mediatype:movies" },
-    { "title": "Free to Watch: Film Noir", "source": "archive", "query": "collection:Film_Noir AND mediatype:movies" },
-    { "title": "Free to Watch: Sci-Fi & Horror", "source": "archive", "query": "collection:SciFi_Horror AND mediatype:movies" },
-    { "title": "Free to Watch: Classic TV", "source": "archive", "query": "collection:classic_tv AND mediatype:movies" },
-    { "title": "Free to Watch: Cartoons", "source": "archive", "query": "collection:animationandcartoons AND mediatype:movies" },
-    { "title": "Free to Watch: Silent Films", "source": "archive", "query": "collection:silent_films AND mediatype:movies" },
+    { "title": "Free to Watch: Classic Films", "source": "archive", "limit": 40, "query": "collection:feature_films AND mediatype:movies" },
+    { "title": "Free to Watch: Comedies", "source": "archive", "limit": 40, "query": "collection:feature_films AND subject:comedy AND mediatype:movies" },
+    { "title": "Free to Watch: Westerns", "source": "archive", "limit": 40, "query": "collection:feature_films AND subject:western AND mediatype:movies" },
+    { "title": "Free to Watch: Film Noir", "source": "archive", "limit": 40, "query": "collection:Film_Noir AND mediatype:movies" },
+    { "title": "Free to Watch: Sci-Fi & Horror", "source": "archive", "limit": 40, "query": "collection:SciFi_Horror AND mediatype:movies" },
+    { "title": "Free to Watch: Classic TV", "source": "archive", "limit": 40, "query": "collection:classic_tv AND mediatype:movies" },
+    { "title": "Free to Watch: Cartoons", "source": "archive", "limit": 40, "query": "collection:animationandcartoons AND mediatype:movies" },
+    { "title": "Free to Watch: Silent Films", "source": "archive", "limit": 40, "query": "collection:silent_films AND mediatype:movies" },
 
     {
       "title": "My Library",

@@ -97,8 +97,18 @@
         pending--;
         if (pending > 0) { return; }
         rows = [];
+        var seenArchive = {};
         for (var i = 0; i < results.length; i++) {
-          if (results[i] && results[i].items.length) { rows.push(results[i]); }
+          if (!results[i]) { continue; }
+          /* Internet Archive rows overlap a lot: show each film only once, in the first row it appears. */
+          results[i].items = results[i].items.filter(function (it) {
+            if (!it.archive) { return true; }
+            var keys = [it.id, 't:' + norm(it.title)];
+            if (seenArchive[keys[0]] || seenArchive[keys[1]]) { return false; }
+            seenArchive[keys[0]] = seenArchive[keys[1]] = true;
+            return true;
+          });
+          if (results[i].items.length) { rows.push(results[i]); }
         }
         setStatus(rows.length ? '' : 'Nothing to show - check your internet connection');
         render();
@@ -114,6 +124,7 @@
             var list = data.response.docs.map(function (d) {
               return {
                 id: d.identifier,
+                archive: true,
                 title: clean(d.title),
                 description: clean(d.description),
                 year: d.year ? String(d.year).substring(0, 4) : '',
@@ -295,9 +306,15 @@
   function play() {
     $('player').className = '';
     view = 'player';
+    if (current.archive) {
+      /* Free Internet Archive films play in archive.org's own player. */
+      vidcoreFrame.src = ARCHIVE + '/embed/' + encodeURIComponent(current.id);
+      showMsg('Loading film...', true);
+      return;
+    }
     var type = (current.kind === 'tv') ? 'tv' : 'movie';
     var movieId = current.tmdbId || current.id || '';
-    
+
     var url = 'https://vidcore.io/' + type + '/' + encodeURIComponent(movieId);
     if (type === 'tv') {
       url += '/1/1';
