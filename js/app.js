@@ -420,15 +420,71 @@
     if (t && !keep) { msgTimer = setTimeout(function () { m.textContent = ''; }, 2000); }
   }
 
+  /* Free Internet Archive films: play the video file directly in a plain <video> element.
+     (archive.org's embed page needs a modern browser and hangs on older TVs.) */
+  var vid = $('vid');
+  var playToken = 0;
+
+  function pickArchiveFile(files) {
+    var order = ['h.264', 'MPEG4', '512Kb MPEG4', 'h.264 HD'];
+    for (var i = 0; i < order.length; i++) {
+      for (var j = 0; j < files.length; j++) {
+        if (files[j].format === order[i] && /\.(mp4|m4v)$/i.test(files[j].name)) { return files[j]; }
+      }
+    }
+    for (var k = 0; k < files.length; k++) {
+      if (/\.(mp4|m4v)$/i.test(files[k].name)) { return files[k]; }
+    }
+    return null;
+  }
+
+  function playArchive(item) {
+    var token = ++playToken;
+    vid.className = 'hidden';
+    showMsg('Loading film...', true);
+    get(ARCHIVE + '/metadata/' + encodeURIComponent(item.id), function (err, meta) {
+      if (token !== playToken || view !== 'player') { return; }
+      var f = (!err && meta && meta.files) ? pickArchiveFile(meta.files) : null;
+      if (!f) { showMsg('No playable video file found for this film. Press Back.', true); return; }
+      vid.onerror = function () {
+        if (token === playToken) { showMsg('This film could not be played on this TV. Press Back.', true); }
+      };
+      vid.onplaying = function () { if (token === playToken) { showMsg(''); } };
+      vid.onwaiting = function () { if (token === playToken) { showMsg('Buffering...', true); } };
+      vid.oncanplay = function () { if (token === playToken && !vid.paused) { showMsg(''); } };
+      vid.src = ARCHIVE + '/download/' + encodeURIComponent(item.id) + '/' + encodeURIComponent(f.name);
+      vid.className = '';
+      showMsg('Loading film (' + Math.round((f.size || 0) / 1048576) + ' MB)...', true);
+      var p = vid.play();
+      if (p && p.catch) { p.catch(function () {}); }
+    });
+  }
+
+  function stopVideo() {
+    playToken++;
+    try { vid.pause(); } catch (e) {}
+    vid.removeAttribute('src');
+    vid.onerror = vid.onplaying = vid.onwaiting = vid.oncanplay = null;
+    try { vid.load(); } catch (e) {}
+    vid.className = 'hidden';
+  }
+
+  function videoKey(k) {
+    if (vid.className.indexOf('hidden') > -1 || !vid.getAttribute('src')) { return false; }
+    if (k === KEY.ENTER || k === KEY.PLAYPAUSE) {
+      if (vid.paused) { vid.play(); showMsg('Play'); } else { vid.pause(); showMsg('Paused'); }
+    } else if (k === KEY.PLAY) { vid.play(); showMsg('Play'); }
+    else if (k === KEY.PAUSE) { vid.pause(); showMsg('Paused'); }
+    else if (k === KEY.RIGHT || k === KEY.FF) { vid.currentTime = Math.min((vid.duration || 1e9), vid.currentTime + 30); showMsg('+30s'); }
+    else if (k === KEY.LEFT || k === KEY.RW) { vid.currentTime = Math.max(0, vid.currentTime - 10); showMsg('-10s'); }
+    else { return false; }
+    return true;
+  }
+
   function play() {
     $('player').className = '';
     view = 'player';
-    if (current.archive) {
-      /* Free Internet Archive films play in archive.org's own player. */
-      vidcoreFrame.src = ARCHIVE + '/embed/' + encodeURIComponent(current.id);
-      showMsg('Loading film...', true);
-      return;
-    }
+    if (current.archive) { playArchive(current); return; }
     var type = (current.kind === 'tv') ? 'tv' : 'movie';
     var movieId = current.tmdbId || current.id || '';
 
@@ -443,6 +499,7 @@
   }
 
   function stop() {
+    stopVideo();
     vidcoreFrame.src = 'about:blank';
     $('player').className = 'hidden';
     $('detail').className = '';
@@ -459,6 +516,7 @@
 
     if (view === 'player') {
       if (isBack(k) || k === KEY.STOP) { stop(); e.preventDefault(); }
+      else if (videoKey(k)) { e.preventDefault(); }
       return;
     }
 
