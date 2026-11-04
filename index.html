@@ -17,8 +17,16 @@
       <h1 id="detail-title"></h1>
       <p id="detail-desc"></p>
       <p id="detail-where"></p>
-      <div id="detail-play" class="btn focus">&#9654; Play</div>
+      <div id="detail-buttons">
+        <div id="detail-play" class="btn focus">&#9654; Play</div>
+        <div id="detail-trailer" class="btn hidden">&#127910; Trailer</div>
+      </div>
     </div>
+  </div>
+
+  <div id="trailer" class="hidden">
+    <iframe id="trailer-frame" src="about:blank" allowfullscreen allow="autoplay; encrypted-media; fullscreen"></iframe>
+    <div id="trailer-hint">Press Back to close</div>
   </div>
 
   <div id="player" class="hidden">

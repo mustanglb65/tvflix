@@ -6,7 +6,7 @@
 
   var rows = [];            /* [{title, items:[{title, description, poster, id, video}]}] */
   var focus = { r: 0, c: 0 };
-  var view = 'home';        /* home | detail | player */
+  var view = 'home';        /* home | detail | trailer | player */
   var current = null;
   var msgTimer = null;
 
@@ -40,6 +40,7 @@
   var COUNTRY = (window.TVFLIX_CONFIG || {}).country || 'US';
   var TMDB_API = 'https://api.themoviedb.org/3';
   var TMDB_IMG = 'https://image.tmdb.org/t/p/w342';
+  var TMDB_LOGO = 'https://image.tmdb.org/t/p/w92';
 
   function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
@@ -217,58 +218,122 @@
   }
 
   /* ---------- detail ---------- */
+  var detailBtn = 0;        /* index into the visible detail buttons */
+
+  function canPlay(it) { return !!(it && (it.id || it.video)); }
+
+  function visibleButtons() {
+    var list = [];
+    if (canPlay(current)) { list.push({ el: $('detail-play'), act: 'play' }); }
+    if (current && current.trailer) { list.push({ el: $('detail-trailer'), act: 'trailer' }); }
+    return list;
+  }
+
+  function updateButtons() {
+    var list = visibleButtons();
+    $('detail-play').className = 'btn hidden';
+    $('detail-trailer').className = 'btn hidden';
+    if (detailBtn >= list.length) { detailBtn = 0; }
+    list.forEach(function (b, i) { b.el.className = 'btn' + (i === detailBtn ? ' focus' : ''); });
+  }
+
+  /* the "where to watch" block: free copy note + provider logos grouped by Stream / Rent / Buy */
+  function renderWhere(item) {
+    var box = $('detail-where');
+    box.innerHTML = '';
+    if (!item || !item.tmdbId) { return; }
+    function line(cls, text) {
+      var d = document.createElement('div');
+      d.className = cls;
+      d.textContent = text;
+      box.appendChild(d);
+    }
+    if (item.loading) { line('where-note', 'Checking where to watch...'); return; }
+    if (!item.whereData) { return; }
+    if (item.id) { line('where-free', '▶ A free public-domain copy is available - press Play.'); }
+    var groups = item.whereData.groups;
+    if (!groups.length) {
+      line('where-note', 'Not listed on any streaming service in ' + COUNTRY + '.');
+    }
+    groups.forEach(function (g) {
+      var wrap = document.createElement('div');
+      wrap.className = 'where-group';
+      var label = document.createElement('span');
+      label.className = 'where-label';
+      label.textContent = g.label;
+      wrap.appendChild(label);
+      g.providers.forEach(function (p) {
+        var chip = document.createElement('span');
+        chip.className = 'chip';
+        if (p.logo) {
+          var img = document.createElement('img');
+          img.src = TMDB_LOGO + p.logo;
+          img.alt = '';
+          chip.appendChild(img);
+        }
+        chip.appendChild(document.createTextNode(p.name));
+        wrap.appendChild(chip);
+      });
+      box.appendChild(wrap);
+    });
+  }
+
   function openDetail() {
     current = rows[focus.r].items[focus.c];
     $('detail-title').textContent = current.title;
     $('detail-desc').textContent = (current.meta ? current.meta + '  —  ' : '') +
       (current.description || 'No description available.');
     $('detail-poster').style.backgroundImage = current.poster ? 'url(' + current.poster + ')' : 'none';
-    $('detail-where').textContent = current.where || '';
-    updatePlayButton();
+    detailBtn = 0;
+    renderWhere(current);
+    updateButtons();
     $('detail').className = '';
     view = 'detail';
     if (current.tmdbId && !current.checked) { current.checked = true; lookupAvailability(current); }
   }
 
-  function canPlay(it) { return !!(it && (it.id || it.video)); }
-
-  function updatePlayButton() {
-    $('detail-play').className = 'btn focus' + (canPlay(current) ? '' : ' hidden');
-  }
-
-  /* where a TMDB title is streaming (JustWatch data via TMDB), plus a free public-domain copy if one exists */
+  /* streaming availability + trailer (official TMDB endpoints), plus a free public-domain copy if one exists */
   function lookupAvailability(item) {
-    var pending = item.kind === 'movie' ? 2 : 1;
-    var providers = '';
-    $('detail-where').textContent = 'Checking where to watch...';
+    var pending = item.kind === 'movie' ? 3 : 2;
+    var groups = [];
+    item.loading = true;
+    renderWhere(item);
 
-    function names(list) {
-      return (list || []).map(function (p) { return p.provider_name; }).join(', ');
-    }
     function fin() {
       pending--;
       if (pending > 0) { return; }
-      var lines = [];
-      if (item.id) { lines.push('▶ A free public-domain copy is available - press Play.'); }
-      lines.push(providers || ('Not listed on any streaming service in ' + COUNTRY + '.'));
-      item.where = lines.join('\n');
-      if (current === item) {
-        $('detail-where').textContent = item.where;
-        updatePlayButton();
-      }
+      item.loading = false;
+      item.whereData = { groups: groups };
+      if (current === item) { renderWhere(item); updateButtons(); }
     }
 
-    get(TMDB_API + '/' + item.kind + '/' + item.tmdbId + '/watch/providers?api_key=' + TMDB_KEY, function (e, d) {
+    var base = TMDB_API + '/' + item.kind + '/' + item.tmdbId;
+
+    get(base + '/watch/providers?api_key=' + TMDB_KEY, function (e, d) {
       var r = d && d.results && d.results[COUNTRY];
-      var parts = [];
       if (r) {
-        if (r.flatrate) { parts.push('Stream on: ' + names(r.flatrate)); }
-        if (r.free) { parts.push('Free on: ' + names(r.free)); }
-        if (r.ads) { parts.push('Free with ads on: ' + names(r.ads)); }
-        if (r.rent) { parts.push('Rent on: ' + names(r.rent)); }
-        if (r.buy) { parts.push('Buy on: ' + names(r.buy)); }
+        [['flatrate', 'Stream on'], ['free', 'Free on'], ['ads', 'Free with ads on'],
+         ['rent', 'Rent on'], ['buy', 'Buy on']].forEach(function (g) {
+          if (r[g[0]] && r[g[0]].length) {
+            groups.push({
+              label: g[1],
+              providers: r[g[0]].map(function (p) { return { name: p.provider_name, logo: p.logo_path }; })
+            });
+          }
+        });
       }
-      providers = parts.join('\n');
+      fin();
+    });
+
+    get(base + '/videos?api_key=' + TMDB_KEY, function (e, d) {
+      var best = null;
+      if (!e && d && d.results) {
+        d.results.forEach(function (v) {
+          if (v.site !== 'YouTube' || v.type !== 'Trailer') { return; }
+          if (!best || (v.official && !best.official)) { best = v; }
+        });
+      }
+      if (best) { item.trailer = best.key; }
       fin();
     });
 
@@ -286,6 +351,20 @@
         fin();
       });
     }
+  }
+
+  function openTrailer() {
+    $('trailer-frame').src = 'https://www.youtube.com/embed/' + encodeURIComponent(current.trailer) +
+      '?autoplay=1&rel=0&modestbranding=1';
+    $('trailer').className = '';
+    view = 'trailer';
+  }
+
+  function closeTrailer() {
+    $('trailer-frame').src = 'about:blank';
+    $('trailer').className = 'hidden';
+    view = 'detail';
+    try { window.focus(); } catch (e) {}
   }
 
   function closeDetail() { $('detail').className = 'hidden'; view = 'home'; }
@@ -367,9 +446,19 @@
       return;
     }
 
+    if (view === 'trailer') {
+      if (isBack(k) || k === KEY.STOP) { closeTrailer(); e.preventDefault(); }
+      return;
+    }
+
     if (view === 'detail') {
+      var btns = visibleButtons();
       if (isBack(k)) { closeDetail(); }
-      else if (k === KEY.ENTER && canPlay(current)) { play(); }
+      else if (k === KEY.LEFT && detailBtn > 0) { detailBtn--; updateButtons(); }
+      else if (k === KEY.RIGHT && detailBtn < btns.length - 1) { detailBtn++; updateButtons(); }
+      else if (k === KEY.ENTER && btns[detailBtn]) {
+        if (btns[detailBtn].act === 'play') { play(); } else { openTrailer(); }
+      }
       e.preventDefault();
       return;
     }
