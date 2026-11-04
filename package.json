@@ -1,6 +1,6 @@
-﻿{
+{
   "name": "tvflix",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "TVFlix - browse and stream films on Samsung Tizen TVs",
   "packageType": "app",
   "appName": "TVFlix",
