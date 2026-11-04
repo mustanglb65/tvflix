@@ -1,0 +1,32 @@
+{
+  "hide": ["sex", "porn", "xxx", "erotic", "nude", "nudist", "adult only", "cukesim"],
+  "rows": [
+    {
+      "title": "Classic Feature Films",
+      "source": "archive",
+      "query": "collection:feature_films AND mediatype:movies"
+    },
+    {
+      "title": "Sci-Fi & Horror Classics",
+      "source": "archive",
+      "query": "collection:SciFi_Horror AND mediatype:movies"
+    },
+    {
+      "title": "Comedy Classics",
+      "source": "archive",
+      "query": "collection:comedy_films AND mediatype:movies"
+    },
+    {
+      "title": "My Library",
+      "source": "local",
+      "items": [
+        {
+          "title": "Example: add your own film here",
+          "description": "Replace this entry. Set 'video' to a link to an .mp4 you own, for example on your PC server: http://192.168.0.101:8080/MyFilm.mp4",
+          "poster": "",
+          "video": ""
+        }
+      ]
+    }
+  ]
+}

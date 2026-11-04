@@ -1,0 +1,10 @@
+﻿{
+  "name": "tvflix",
+  "version": "1.0.0",
+  "description": "TVFlix - browse and stream films on Samsung Tizen TVs",
+  "packageType": "app",
+  "appName": "TVFlix",
+  "appPath": "index.html",
+  "keys": ["MediaPlay", "MediaPause", "MediaPlayPause", "MediaStop", "MediaFastForward", "MediaRewind"],
+  "main": "index.html"
+}
