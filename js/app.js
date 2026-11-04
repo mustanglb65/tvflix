@@ -35,6 +35,50 @@
 
   function setStatus(t) { $('status').textContent = t || ''; }
 
+  /* ---------- TMDB: nicer posters, descriptions and ratings ---------- */
+  var TMDB_KEY = (window.TVFLIX_CONFIG || {}).tmdbKey;
+
+  function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+  function enrichOne(item, cb) {
+    var year = item.year || (item.title.match(/\b(18|19|20)\d\d\b/) || [])[0];
+    var name = item.title.replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/\b(18|19|20)\d\d\b/g, ' ')
+      .replace(/full movie|full film|hd|remastered|restored/ig, ' ').replace(/[_\-:]+/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+    if (!name) { cb(); return; }
+    var url = 'https://api.themoviedb.org/3/search/movie?api_key=' + TMDB_KEY +
+      '&query=' + encodeURIComponent(name) + (year ? '&year=' + year : '');
+    get(url, function (err, data) {
+      var hit = null;
+      if (!err && data && data.results) {
+        for (var i = 0; i < data.results.length; i++) {
+          var a = norm(data.results[i].title), b = norm(name);
+          var sameName = a && (a === b || (a.length > 5 && b.indexOf(a) === 0) || (b.length > 5 && a.indexOf(b) === 0));
+          var ry = parseInt((data.results[i].release_date || '').substring(0, 4), 10);
+          var sameYear = !year || !ry || Math.abs(ry - parseInt(year, 10)) <= 1;
+          if (sameName && sameYear) { hit = data.results[i]; break; }
+        }
+      }
+      if (hit) {
+        if (hit.poster_path) { item.poster = 'https://image.tmdb.org/t/p/w342' + hit.poster_path; }
+        if (hit.overview) { item.description = hit.overview; }
+        var bits = [];
+        if (hit.release_date) { bits.push(hit.release_date.substring(0, 4)); }
+        if (hit.vote_average) { bits.push('★ ' + hit.vote_average.toFixed(1)); }
+        item.meta = bits.join('  ·  ');
+      }
+      cb();
+    });
+  }
+
+  function enrich(items, done) {
+    if (!TMDB_KEY || !items.length) { done(items); return; }
+    var left = items.length;
+    items.forEach(function (it) {
+      enrichOne(it, function () { left--; if (left === 0) { done(items); } });
+    });
+  }
+
   /* ---------- loading the catalog ---------- */
   function loadCatalog() {
     setStatus('Loading...');
@@ -55,28 +99,33 @@
       cat.rows.forEach(function (row, i) {
         if (row.source === 'archive') {
           var q = '/advancedsearch.php?q=' + encodeURIComponent(row.query) +
-            '&fl[]=identifier&fl[]=title&fl[]=description&rows=' + (row.limit || 25) +
+            '&fl[]=identifier&fl[]=title&fl[]=description&fl[]=year&rows=' + (row.limit || 25) +
             '&sort[]=downloads+desc&output=json';
           get(ARCHIVE + q, function (e, data) {
-            if (!e && data && data.response) {
-              var hide = new RegExp('\\b(' + (cat.hide || []).join('|') + ')', 'i');
-              results[i] = { title: row.title, items: data.response.docs.map(function (d) {
-                return {
-                  id: d.identifier,
-                  title: clean(d.title),
-                  description: clean(d.description),
-                  poster: ARCHIVE + '/services/img/' + d.identifier
-                };
-              }).filter(function (it) {
-                return !cat.hide || !cat.hide.length || !hide.test(it.title + ' ' + it.description);
-              }) };
-            }
-            done();
+            if (e || !data || !data.response) { done(); return; }
+            var hide = new RegExp('\\b(' + (cat.hide || []).join('|') + ')', 'i');
+            var list = data.response.docs.map(function (d) {
+              return {
+                id: d.identifier,
+                title: clean(d.title),
+                description: clean(d.description),
+                year: d.year ? String(d.year).substring(0, 4) : '',
+                poster: ARCHIVE + '/services/img/' + d.identifier
+              };
+            }).filter(function (it) {
+              return !cat.hide || !cat.hide.length || !hide.test(it.title + ' ' + it.description);
+            });
+            enrich(list, function (items) {
+              results[i] = { title: row.title, items: items };
+              done();
+            });
           });
         } else {
           var items = (row.items || []).filter(function (it) { return it.video; });
-          results[i] = { title: row.title, items: items };
-          done();
+          enrich(items.filter(function (it) { return !it.poster; }), function () {
+            results[i] = { title: row.title, items: items };
+            done();
+          });
         }
       });
     });
@@ -134,7 +183,8 @@
   function openDetail() {
     current = rows[focus.r].items[focus.c];
     $('detail-title').textContent = current.title;
-    $('detail-desc').textContent = current.description || 'No description available.';
+    $('detail-desc').textContent = (current.meta ? current.meta + '  —  ' : '') +
+      (current.description || 'No description available.');
     $('detail-poster').style.backgroundImage = current.poster ? 'url(' + current.poster + ')' : 'none';
     $('detail').className = '';
     view = 'detail';

@@ -17,6 +17,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: #0b0b1
 .card.focus { border-color: #fff; transform: scale(1.08); z-index: 3; }
 .card .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px; font-size: 20px; background: rgba(0,0,0,0.75); border-radius: 0 0 5px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+#credit { position: absolute; bottom: 12px; right: 40px; font-size: 18px; color: #666; z-index: 6; }
+
 #detail { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; background: #0b0b10; z-index: 10; padding: 140px 160px; display: -webkit-flex; display: flex; }
 #detail-poster { width: 460px; height: 660px; background: #1c1c26 center/cover no-repeat; border-radius: 10px; -webkit-flex: 0 0 auto; flex: 0 0 auto; }
 #detail-info { margin-left: 80px; width: 1000px; }
