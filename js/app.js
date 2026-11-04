@@ -37,6 +37,9 @@
 
   /* ---------- TMDB: nicer posters, descriptions and ratings ---------- */
   var TMDB_KEY = (window.TVFLIX_CONFIG || {}).tmdbKey;
+  var COUNTRY = (window.TVFLIX_CONFIG || {}).country || 'US';
+  var TMDB_API = 'https://api.themoviedb.org/3';
+  var TMDB_IMG = 'https://image.tmdb.org/t/p/w342';
 
   function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
@@ -73,10 +76,16 @@
 
   function enrich(items, done) {
     if (!TMDB_KEY || !items.length) { done(items); return; }
-    var left = items.length;
-    items.forEach(function (it) {
-      enrichOne(it, function () { left--; if (left === 0) { done(items); } });
-    });
+    var next = 0, finished = 0, WORKERS = 4;
+    function work() {
+      if (next >= items.length) { return; }
+      var it = items[next++];
+      enrichOne(it, function () {
+        finished++;
+        if (finished === items.length) { done(items); } else { work(); }
+      });
+    }
+    for (var w = 0; w < WORKERS && w < items.length; w++) { work(); }
   }
 
   /* ---------- loading the catalog ---------- */
@@ -120,6 +129,28 @@
               done();
             });
           });
+        } else if (row.source === 'tmdb') {
+          if (!TMDB_KEY) { done(); return; }
+          var kind = row.type === 'tv' ? 'tv' : 'movie';
+          var turl = TMDB_API + row.path + (row.path.indexOf('?') > -1 ? '&' : '?') +
+            'api_key=' + TMDB_KEY + '&language=en-US&include_adult=false';
+          get(turl, function (e, data) {
+            if (e || !data || !data.results) { done(); return; }
+            var hideT = (cat.hide && cat.hide.length) ? new RegExp('\\b(' + cat.hide.join('|') + ')', 'i') : null;
+            var list = data.results.filter(function (m) { return m.poster_path && !m.adult; }).map(function (m) {
+              var date = m.release_date || m.first_air_date || '';
+              var bits = [];
+              if (date) { bits.push(date.substring(0, 4)); }
+              if (m.vote_average) { bits.push('★ ' + m.vote_average.toFixed(1)); }
+              bits.push(kind === 'tv' ? 'TV Series' : 'Film');
+              return {
+                tmdbId: m.id, kind: kind, title: m.title || m.name, year: date.substring(0, 4),
+                description: m.overview, poster: TMDB_IMG + m.poster_path, meta: bits.join('  ·  ')
+              };
+            }).filter(function (it) { return !hideT || !hideT.test(it.title + ' ' + it.description); });
+            results[i] = { title: row.title, items: list };
+            done();
+          });
         } else {
           var items = (row.items || []).filter(function (it) { return it.video; });
           enrich(items.filter(function (it) { return !it.poster; }), function () {
@@ -152,6 +183,12 @@
         cap.className = 'cap';
         cap.textContent = it.title;
         card.appendChild(cap);
+        if (it.id || it.video) {
+          var badge = document.createElement('div');
+          badge.className = 'badge';
+          badge.textContent = '▶ FREE';
+          card.appendChild(badge);
+        }
         track.appendChild(card);
       });
       wrap.appendChild(track);
@@ -186,8 +223,69 @@
     $('detail-desc').textContent = (current.meta ? current.meta + '  —  ' : '') +
       (current.description || 'No description available.');
     $('detail-poster').style.backgroundImage = current.poster ? 'url(' + current.poster + ')' : 'none';
+    $('detail-where').textContent = current.where || '';
+    updatePlayButton();
     $('detail').className = '';
     view = 'detail';
+    if (current.tmdbId && !current.checked) { current.checked = true; lookupAvailability(current); }
+  }
+
+  function canPlay(it) { return !!(it && (it.id || it.video)); }
+
+  function updatePlayButton() {
+    $('detail-play').className = 'btn focus' + (canPlay(current) ? '' : ' hidden');
+  }
+
+  /* where a TMDB title is streaming (JustWatch data via TMDB), plus a free public-domain copy if one exists */
+  function lookupAvailability(item) {
+    var pending = item.kind === 'movie' ? 2 : 1;
+    var providers = '';
+    $('detail-where').textContent = 'Checking where to watch...';
+
+    function names(list) {
+      return (list || []).map(function (p) { return p.provider_name; }).join(', ');
+    }
+    function fin() {
+      pending--;
+      if (pending > 0) { return; }
+      var lines = [];
+      if (item.id) { lines.push('▶ A free public-domain copy is available - press Play.'); }
+      lines.push(providers || ('Not listed on any streaming service in ' + COUNTRY + '.'));
+      item.where = lines.join('\n');
+      if (current === item) {
+        $('detail-where').textContent = item.where;
+        updatePlayButton();
+      }
+    }
+
+    get(TMDB_API + '/' + item.kind + '/' + item.tmdbId + '/watch/providers?api_key=' + TMDB_KEY, function (e, d) {
+      var r = d && d.results && d.results[COUNTRY];
+      var parts = [];
+      if (r) {
+        if (r.flatrate) { parts.push('Stream on: ' + names(r.flatrate)); }
+        if (r.free) { parts.push('Free on: ' + names(r.free)); }
+        if (r.ads) { parts.push('Free with ads on: ' + names(r.ads)); }
+        if (r.rent) { parts.push('Rent on: ' + names(r.rent)); }
+        if (r.buy) { parts.push('Buy on: ' + names(r.buy)); }
+      }
+      providers = parts.join('\n');
+      fin();
+    });
+
+    if (item.kind === 'movie') {
+      var y = parseInt(item.year, 10);
+      var q = 'title:(' + item.title.replace(/["()\[\]:]/g, ' ') + ') AND mediatype:movies' +
+        (y ? ' AND year:[' + (y - 1) + ' TO ' + (y + 1) + ']' : '');
+      get(ARCHIVE + '/advancedsearch.php?q=' + encodeURIComponent(q) +
+        '&fl[]=identifier&fl[]=title&rows=10&sort[]=downloads+desc&output=json', function (e, d) {
+        if (!e && d && d.response) {
+          for (var i = 0; i < d.response.docs.length; i++) {
+            if (norm(clean(d.response.docs[i].title)) === norm(item.title)) { item.id = d.response.docs[i].identifier; break; }
+          }
+        }
+        fin();
+      });
+    }
   }
 
   function closeDetail() { $('detail').className = 'hidden'; view = 'home'; }
@@ -271,7 +369,7 @@
 
     if (view === 'detail') {
       if (isBack(k)) { closeDetail(); }
-      else if (k === KEY.ENTER) { play(); }
+      else if (k === KEY.ENTER && canPlay(current)) { play(); }
       e.preventDefault();
       return;
     }

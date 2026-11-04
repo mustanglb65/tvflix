@@ -1,21 +1,22 @@
 {
-  "hide": ["sex", "porn", "xxx", "erotic", "nude", "nudist", "adult only", "cukesim"],
+  "hide": ["sex", "porn", "xxx", "erotic", "nude", "nudist", "adult only", "cukesim", "hentai", "gore", "molest", "rape", "incest", "naked", "striptease", "strip tease", "fetish", "orgy", "lust", "sexy", "playboy", "lolita", "bondage"],
   "rows": [
-    {
-      "title": "Classic Feature Films",
-      "source": "archive",
-      "query": "collection:feature_films AND mediatype:movies"
-    },
-    {
-      "title": "Sci-Fi & Horror Classics",
-      "source": "archive",
-      "query": "collection:SciFi_Horror AND mediatype:movies"
-    },
-    {
-      "title": "Comedy Classics",
-      "source": "archive",
-      "query": "collection:comedy_films AND mediatype:movies"
-    },
+    { "title": "Trending This Week", "source": "tmdb", "path": "/trending/movie/week" },
+    { "title": "Popular Movies", "source": "tmdb", "path": "/movie/popular" },
+    { "title": "Top Rated Movies", "source": "tmdb", "path": "/movie/top_rated" },
+    { "title": "Family & Animation", "source": "tmdb", "path": "/discover/movie?with_genres=16,10751&sort_by=popularity.desc" },
+    { "title": "Popular TV Series", "source": "tmdb", "type": "tv", "path": "/tv/popular" },
+    { "title": "Top Rated TV Series", "source": "tmdb", "type": "tv", "path": "/tv/top_rated" },
+
+    { "title": "Free to Watch: Classic Films", "source": "archive", "query": "collection:feature_films AND mediatype:movies" },
+    { "title": "Free to Watch: Comedies", "source": "archive", "query": "collection:feature_films AND subject:comedy AND mediatype:movies" },
+    { "title": "Free to Watch: Westerns", "source": "archive", "query": "collection:feature_films AND subject:western AND mediatype:movies" },
+    { "title": "Free to Watch: Film Noir", "source": "archive", "query": "collection:Film_Noir AND mediatype:movies" },
+    { "title": "Free to Watch: Sci-Fi & Horror", "source": "archive", "query": "collection:SciFi_Horror AND mediatype:movies" },
+    { "title": "Free to Watch: Classic TV", "source": "archive", "query": "collection:classic_tv AND mediatype:movies" },
+    { "title": "Free to Watch: Cartoons", "source": "archive", "query": "collection:animationandcartoons AND mediatype:movies" },
+    { "title": "Free to Watch: Silent Films", "source": "archive", "query": "collection:silent_films AND mediatype:movies" },
+
     {
       "title": "My Library",
       "source": "local",
