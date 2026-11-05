@@ -93,25 +93,46 @@
       if (err) { setStatus('Could not read catalog.json'); return; }
       var pending = cat.rows.length;
       var results = new Array(cat.rows.length);
-      var done = function () {
-        pending--;
-        if (pending > 0) { return; }
-        rows = [];
-        var seenArchive = {};
+      var shown = false, timer = null;
+
+      /* Build the row list from whatever has arrived so far, in catalog order. */
+      var assemble = function () {
+        var list = [], seenArchive = {};
         for (var i = 0; i < results.length; i++) {
           if (!results[i]) { continue; }
           /* Internet Archive rows overlap a lot: show each film only once, in the first row it appears. */
-          results[i].items = results[i].items.filter(function (it) {
+          var items = results[i].items.filter(function (it) {
             if (!it.archive) { return true; }
             var keys = [it.id, 't:' + norm(it.title)];
             if (seenArchive[keys[0]] || seenArchive[keys[1]]) { return false; }
             seenArchive[keys[0]] = seenArchive[keys[1]] = true;
             return true;
           });
-          if (results[i].items.length) { rows.push(results[i]); }
+          if (items.length) { list.push({ title: results[i].title, items: items }); }
         }
-        setStatus(rows.length ? '' : 'Nothing to show - check your internet connection');
-        render();
+        return list;
+      };
+
+      var show = function () {
+        timer = null;
+        var list = assemble();
+        if (homeRows) { homeRows = list; return; } /* user is looking at search results */
+        rows = list;
+        if (!list.length) {
+          if (pending <= 0) { setStatus('Nothing to show - check your internet connection'); }
+          return;
+        }
+        setStatus(pending > 0 ? 'Loading more...' : '');
+        render(shown);
+        shown = true;
+      };
+
+      /* Show rows as soon as they arrive instead of waiting for the slowest one. */
+      var done = function () {
+        pending--;
+        if (pending <= 0) { clearTimeout(timer); show(); }
+        else if (!shown) { show(); }
+        else if (!timer) { timer = setTimeout(show, 600); }
       };
       cat.rows.forEach(function (row, i) {
         if (row.source === 'archive') {
@@ -133,10 +154,10 @@
             }).filter(function (it) {
               return !cat.hide || !cat.hide.length || !hide.test(it.title + ' ' + it.description);
             });
-            enrich(list, function (items) {
-              results[i] = { title: row.title, items: items };
-              done();
-            });
+            /* No per-film TMDB lookups here (hundreds of requests choke a slow TV connection):
+               a film is looked up once, when you open it. */
+            results[i] = { title: row.title, items: list };
+            done();
           });
         } else if (row.source === 'tmdb') {
           if (!TMDB_KEY) { done(); return; }
@@ -171,8 +192,9 @@
     });
   }
 
-  function render() {
+  function render(keepFocus) {
     rowsInner.innerHTML = '';
+    lastFocusEl = null;
     rows.forEach(function (row, r) {
       var rowEl = document.createElement('div');
       rowEl.className = 'row';
@@ -186,7 +208,8 @@
       row.items.forEach(function (it, c) {
         var card = document.createElement('div');
         card.className = 'card';
-        if (it.poster) { card.style.backgroundImage = 'url(' + it.poster + ')'; }
+        /* posters load lazily (only for cards near the screen) - see updateFocus */
+        if (it.poster) { card.setAttribute('data-poster', it.poster); }
         var cap = document.createElement('div');
         cap.className = 'cap';
         cap.textContent = it.title;
@@ -220,7 +243,13 @@
       rowsInner.appendChild(rowEl);
     });
     $('homeback').className = 'sbtn mouseonly' + (homeRows ? '' : ' hidden');
-    focus = { r: 0, c: 0 };
+    if (keepFocus) {
+      /* rows were added while browsing: stay where the user is */
+      focus.r = Math.min(focus.r, rows.length - 1);
+      if (focus.r >= 0) { focus.c = Math.min(focus.c, rows[focus.r].items.length - 1); }
+    } else {
+      focus = { r: 0, c: 0 };
+    }
     updateFocus();
   }
 
@@ -340,6 +369,8 @@
     });
   }
 
+  var lastFocusEl = null;
+
   function updateFocus() {
     $('searchbtn').className = 'sbtn' + (focus.r === -1 ? ' focus' : '');
     var rowEls = rowsInner.children;
@@ -347,11 +378,28 @@
       var track = rowEls[r].querySelector('.track');
       var cards = track.children;
       var c = (r === focus.r) ? focus.c : 0;
-      for (var k = 0; k < cards.length; k++) {
-        cards[k].className = 'card' + (r === focus.r && k === focus.c ? ' focus' : '');
-      }
       var off = Math.max(0, c - 3) * CARD_STEP;
-      track.style.webkitTransform = track.style.transform = 'translateX(-' + off + 'px)';
+      if (track._off !== off) {
+        track._off = off;
+        track.style.webkitTransform = track.style.transform = 'translateX(-' + off + 'px)';
+      }
+      /* load posters only for rows near the screen and cards near the visible part of the row */
+      if (Math.abs(r - Math.max(focus.r, 0)) <= 2) {
+        for (var k = Math.max(0, c - 1); k < Math.min(cards.length, c + 10); k++) {
+          var cd = cards[k];
+          if (!cd._loaded) {
+            cd._loaded = true;
+            var pu = cd.getAttribute('data-poster');
+            if (pu) { cd.style.backgroundImage = 'url(' + pu + ')'; }
+          }
+        }
+      }
+    }
+    /* only touch the previously and newly focused cards (not every card) */
+    if (lastFocusEl) { lastFocusEl.className = 'card'; lastFocusEl = null; }
+    if (focus.r >= 0 && rowEls[focus.r]) {
+      var fc = rowEls[focus.r].querySelector('.track').children[focus.c];
+      if (fc) { fc.className = 'card focus'; lastFocusEl = fc; }
     }
     var vOff = Math.max(0, focus.r - 1) * ROW_HEIGHT;
     rowsInner.style.webkitTransform = rowsInner.style.transform = 'translateY(-' + vOff + 'px)';
@@ -397,7 +445,20 @@
     updateButtons();
     $('detail').className = '';
     view = 'detail';
-    
+
+    /* free films: fetch the nicer poster/description from TMDB once, only for the film you opened */
+    if (current.archive && !current.enriched && TMDB_KEY) {
+      current.enriched = true;
+      var opened = current;
+      enrichOne(opened, function () {
+        if (view === 'detail' && current === opened) {
+          $('detail-desc').textContent = (opened.meta ? opened.meta + '  —  ' : '') +
+            (opened.description || 'No description available.');
+          $('detail-poster').style.backgroundImage = opened.poster ? 'url(' + opened.poster + ')' : 'none';
+        }
+      });
+    }
+
     if (current.tmdbId && !current.checked) {
       current.checked = true;
       var base = TMDB_API + '/' + current.kind + '/' + current.tmdbId;
@@ -444,7 +505,8 @@
   var playToken = 0;
 
   function pickArchiveFile(files) {
-    var order = ['h.264', 'MPEG4', '512Kb MPEG4', 'h.264 HD'];
+    /* smaller files first: they start sooner and buffer less on a slow connection */
+    var order = ['h.264', '512Kb MPEG4', 'MPEG4', 'h.264 HD'];
     for (var i = 0; i < order.length; i++) {
       for (var j = 0; j < files.length; j++) {
         if (files[j].format === order[i] && /\.(mp4|m4v)$/i.test(files[j].name)) { return files[j]; }
