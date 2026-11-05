@@ -8,16 +8,18 @@
 </head>
 <body>
 <div id="app">
-  <div id="topbar"><span class="logo">Shatila Family Flixer</span><span id="status"></span><div id="searchbtn" class="sbtn">&#128269; Search</div></div>
+  <div id="topbar"><span class="logo">Shatila Family Flixer</span><span id="status"></span><div id="homeback" class="sbtn mouseonly hidden">&#8592; Back</div><div id="searchbtn" class="sbtn">&#128269; Search</div></div>
 
   <div id="search" class="hidden">
     <div id="search-title">Search movies &amp; shows</div>
     <input id="search-input" type="text" placeholder="Type a title, then press Enter / Done" autocomplete="off">
     <div id="search-hint">Press Back to cancel</div>
+    <div id="back-search" class="backbtn mouseonly">&#8592; Back</div>
   </div>
   <div id="rows"><div id="rows-inner"></div></div>
 
   <div id="detail" class="hidden">
+    <div id="back-detail" class="backbtn mouseonly">&#8592; Back</div>
     <div id="detail-poster"></div>
     <div id="detail-info">
       <h1 id="detail-title"></h1>
@@ -33,6 +35,7 @@
   <div id="trailer" class="hidden">
     <iframe id="trailer-frame" src="about:blank" allowfullscreen allow="autoplay; encrypted-media; fullscreen"></iframe>
     <div id="trailer-hint">Press Back to close</div>
+    <div id="back-trailer" class="backbtn mouseonly">&#8592; Back</div>
   </div>
 
   <div id="player" class="hidden">
@@ -42,9 +45,25 @@
     <video id="vid" class="hidden" preload="auto"></video>
     <div id="player-msg"></div>
     <div id="trailer-hint">Press Back to close</div>
+    <div id="back-player" class="backbtn mouseonly">&#8592; Back</div>
+    <div id="vbar" class="hidden">
+      <div id="vprog"><div id="vprog-fill"></div></div>
+      <div id="vrow">
+        <span id="vtime">0:00 / 0:00</span>
+        <span class="vbtns">
+          <span id="v-rw" class="vb">&#9194; 10s</span>
+          <span id="v-pp" class="vb">&#10074;&#10074; Pause</span>
+          <span id="v-ff" class="vb">30s &#9193;</span>
+          <span id="v-asp" class="vb">Screen: Fit</span>
+          <span id="v-fs" class="vb mouseonly">&#9974; Full</span>
+        </span>
+      </div>
+      <div id="vhint">Up / A / Yellow: screen mode &nbsp;&middot;&nbsp; Enter / Space: pause &nbsp;&middot;&nbsp; Left / Right: seek &nbsp;&middot;&nbsp; F: fullscreen (PC) &nbsp;&middot;&nbsp; Back: close</div>
+    </div>
   </div>
+
+  <div id="credit">This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming data by JustWatch.</div>
 </div>
-<div id="credit">This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming data by JustWatch.</div>
 <script src="js/config.js"></script>
 <script src="js/app.js"></script>
 </body>

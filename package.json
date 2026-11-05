@@ -1,10 +1,10 @@
 {
   "name": "tvflix",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "description": "Shatila Family Flixer - browse and stream films on Samsung Tizen TVs",
   "packageType": "app",
   "appName": "Shatila Family Flixer",
   "appPath": "index.html",
-  "keys": ["MediaPlay", "MediaPause", "MediaPlayPause", "MediaStop", "MediaFastForward", "MediaRewind"],
+  "keys": ["MediaPlay", "MediaPause", "MediaPlayPause", "MediaStop", "MediaFastForward", "MediaRewind", "ColorF2Yellow"],
   "main": "index.html"
 }

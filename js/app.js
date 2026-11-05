@@ -196,14 +196,30 @@
         badge.className = 'badge';
         badge.textContent = '▶ STREAM';
         card.appendChild(badge);
-        
+
+        /* mouse: click a card to open it */
+        card.onclick = function () { focus.r = r; focus.c = c; updateFocus(); openDetail(); };
         track.appendChild(card);
       });
       wrap.appendChild(track);
+      /* mouse: arrows to scroll a row sideways (only shown when a mouse is being used) */
+      [['left', -5, '‹'], ['right', 5, '›']].forEach(function (a) {
+        var ar = document.createElement('div');
+        ar.className = 'arrow ' + a[0];
+        ar.textContent = a[2];
+        ar.onclick = function () {
+          var cur = (focus.r === r) ? focus.c : 0;
+          focus.r = r;
+          focus.c = Math.max(0, Math.min(row.items.length - 1, cur + a[1]));
+          updateFocus();
+        };
+        wrap.appendChild(ar);
+      });
       rowEl.appendChild(t);
       rowEl.appendChild(wrap);
       rowsInner.appendChild(rowEl);
     });
+    $('homeback').className = 'sbtn mouseonly' + (homeRows ? '' : ' hidden');
     focus = { r: 0, c: 0 };
     updateFocus();
   }
@@ -364,7 +380,9 @@
     if (!item) { return; }
     var d = document.createElement('div');
     d.className = 'where-free';
-    d.textContent = '▶ Ready to stream instantly via VidCore Player (Press Play)';
+    d.textContent = item.archive ? '▶ Free to watch (public domain) - press Play'
+      : item.video ? '▶ From your library - press Play'
+      : '▶ Ready to stream instantly via VidCore Player (Press Play)';
     box.appendChild(d);
   }
 
@@ -438,6 +456,71 @@
     return null;
   }
 
+  /* ---- screen modes for the video player: Fit / Fill / Stretch / Zoom ---- */
+  var ASPECTS = ['Fit', 'Fill', 'Stretch', 'Zoom'];
+  var aspect = 0;
+  try { aspect = parseInt(localStorage.getItem('tvflix.aspect'), 10) || 0; } catch (e) {}
+  if (aspect < 0 || aspect >= ASPECTS.length) { aspect = 0; }
+
+  function applyAspect() { vid.setAttribute('data-aspect', ASPECTS[aspect].toLowerCase()); updateBar(); }
+
+  function cycleAspect() {
+    aspect = (aspect + 1) % ASPECTS.length;
+    try { localStorage.setItem('tvflix.aspect', String(aspect)); } catch (e) {}
+    applyAspect();
+    showMsg('Screen: ' + ASPECTS[aspect]);
+  }
+
+  /* ---- control bar (time, progress, buttons) ---- */
+  var barTimer = null;
+
+  function fmt(t) {
+    t = Math.max(0, Math.floor(t || 0));
+    var h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function updateBar() {
+    $('vtime').textContent = fmt(vid.currentTime) + ' / ' + fmt(vid.duration);
+    $('vprog-fill').style.width = (vid.duration ? (vid.currentTime / vid.duration * 100) : 0) + '%';
+    $('v-pp').textContent = vid.paused ? '▶ Play' : '❚❚ Pause';
+    $('v-asp').textContent = 'Screen: ' + ASPECTS[aspect];
+  }
+
+  function showBar() {
+    $('vbar').className = '';
+    clearTimeout(barTimer);
+    barTimer = setTimeout(function () { if (!vid.paused) { $('vbar').className = 'hidden'; } }, 4000);
+  }
+
+  vid.addEventListener('timeupdate', updateBar);
+  vid.addEventListener('pause', function () { updateBar(); showBar(); });
+  vid.addEventListener('play', function () { updateBar(); showBar(); });
+
+  function toggleFullscreen() {
+    var d = document, el = d.documentElement;
+    try {
+      if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); }
+      else { (el.requestFullscreen || el.webkitRequestFullscreen).call(el); }
+    } catch (e) {}
+  }
+
+  function playVideo(url, sizeBytes, token) {
+    vid.onerror = function () {
+      if (token === playToken) { showMsg('This video could not be played on this device. Press Back.', true); }
+    };
+    vid.onplaying = function () { if (token === playToken) { showMsg(''); } };
+    vid.onwaiting = function () { if (token === playToken) { showMsg('Buffering...', true); } };
+    vid.oncanplay = function () { if (token === playToken && !vid.paused) { showMsg(''); } };
+    vid.src = url;
+    vid.className = '';
+    applyAspect();
+    showBar();
+    showMsg('Loading' + (sizeBytes ? ' (' + Math.round(sizeBytes / 1048576) + ' MB)' : '') + '...', true);
+    var p = vid.play();
+    if (p && p.catch) { p.catch(function () {}); }
+  }
+
   function playArchive(item) {
     var token = ++playToken;
     vid.className = 'hidden';
@@ -446,17 +529,8 @@
       if (token !== playToken || view !== 'player') { return; }
       var f = (!err && meta && meta.files) ? pickArchiveFile(meta.files) : null;
       if (!f) { showMsg('No playable video file found for this film. Press Back.', true); return; }
-      vid.onerror = function () {
-        if (token === playToken) { showMsg('This film could not be played on this TV. Press Back.', true); }
-      };
-      vid.onplaying = function () { if (token === playToken) { showMsg(''); } };
-      vid.onwaiting = function () { if (token === playToken) { showMsg('Buffering...', true); } };
-      vid.oncanplay = function () { if (token === playToken && !vid.paused) { showMsg(''); } };
-      vid.src = ARCHIVE + '/download/' + encodeURIComponent(item.id) + '/' + encodeURIComponent(f.name);
-      vid.className = '';
-      showMsg('Loading film (' + Math.round((f.size || 0) / 1048576) + ' MB)...', true);
-      var p = vid.play();
-      if (p && p.catch) { p.catch(function () {}); }
+      playVideo(ARCHIVE + '/download/' + encodeURIComponent(item.id) + '/' + encodeURIComponent(f.name),
+        parseInt(f.size, 10) || 0, token);
     });
   }
 
@@ -467,16 +541,31 @@
     vid.onerror = vid.onplaying = vid.onwaiting = vid.oncanplay = null;
     try { vid.load(); } catch (e) {}
     vid.className = 'hidden';
+    $('vbar').className = 'hidden';
+  }
+
+  function videoActive() { return vid.className.indexOf('hidden') < 0 && !!vid.getAttribute('src'); }
+
+  function togglePause() {
+    if (vid.paused) { var p = vid.play(); if (p && p.catch) { p.catch(function () {}); } showMsg('Play'); }
+    else { vid.pause(); showMsg('Paused'); }
+  }
+  function seekBy(s) {
+    vid.currentTime = Math.max(0, Math.min(vid.duration || 1e9, vid.currentTime + s));
+    showMsg((s > 0 ? '+' : '') + s + 's');
   }
 
   function videoKey(k) {
-    if (vid.className.indexOf('hidden') > -1 || !vid.getAttribute('src')) { return false; }
-    if (k === KEY.ENTER || k === KEY.PLAYPAUSE) {
-      if (vid.paused) { vid.play(); showMsg('Play'); } else { vid.pause(); showMsg('Paused'); }
-    } else if (k === KEY.PLAY) { vid.play(); showMsg('Play'); }
-    else if (k === KEY.PAUSE) { vid.pause(); showMsg('Paused'); }
-    else if (k === KEY.RIGHT || k === KEY.FF) { vid.currentTime = Math.min((vid.duration || 1e9), vid.currentTime + 30); showMsg('+30s'); }
-    else if (k === KEY.LEFT || k === KEY.RW) { vid.currentTime = Math.max(0, vid.currentTime - 10); showMsg('-10s'); }
+    if (!videoActive()) { return false; }
+    showBar();
+    if (k === KEY.ENTER || k === KEY.PLAYPAUSE || k === 32) { togglePause(); }
+    else if (k === KEY.PLAY) { if (vid.paused) { togglePause(); } }
+    else if (k === KEY.PAUSE) { if (!vid.paused) { togglePause(); } }
+    else if (k === KEY.RIGHT || k === KEY.FF) { seekBy(30); }
+    else if (k === KEY.LEFT || k === KEY.RW) { seekBy(-10); }
+    else if (k === KEY.UP || k === 65 || k === 405) { cycleAspect(); }  /* Up, A, or the remote's yellow button */
+    else if (k === KEY.DOWN) { /* just shows the bar */ }
+    else if (k === 70) { toggleFullscreen(); }
     else { return false; }
     return true;
   }
@@ -485,6 +574,7 @@
     $('player').className = '';
     view = 'player';
     if (current.archive) { playArchive(current); return; }
+    if (current.video) { playVideo(current.video, 0, ++playToken); return; }
     var type = (current.kind === 'tv') ? 'tv' : 'movie';
     var movieId = current.tmdbId || current.id || '';
 
@@ -511,8 +601,16 @@
 
   function isBack(k) { return k === KEY.BACK || k === KEY.ESC || k === KEY.BKSP; }
 
+  var noopEv = { preventDefault: function () {}, stopPropagation: function () {} };
+  function fireKey(k) { handleKey(k, noopEv); }
   document.addEventListener('keydown', function (e) {
-    var k = e.keyCode;
+    document.body.className = document.body.className.replace(/\s*\bmouse\b/, '');
+    handleKey(e.keyCode, e);
+  });
+
+  function handleKey(k, e) {
+    /* F = browser fullscreen on a PC (not while typing in the search box) */
+    if (k === 70 && view !== 'search') { toggleFullscreen(); return; }
 
     if (view === 'player') {
       if (isBack(k) || k === KEY.STOP) { stop(); e.preventDefault(); }
@@ -570,11 +668,58 @@
     }
     updateFocus();
     e.preventDefault();
+  }
+
+  /* ---- PC support: scale the 1920x1080 layout to any window, and mouse controls ---- */
+  var appEl = $('app');
+  function fit() {
+    var w = window.innerWidth, h = window.innerHeight;
+    if (!w || !h) { return; } /* window hidden or not laid out yet */
+    var s = Math.min(w / 1920, h / 1080);
+    var x = (w - 1920 * s) / 2, y = (h - 1080 * s) / 2;
+    var t = 'translate(' + x + 'px,' + y + 'px) scale(' + s + ')';
+    appEl.style.webkitTransform = appEl.style.transform = t;
+  }
+  window.addEventListener('resize', fit);
+  window.addEventListener('load', fit);
+  fit();
+
+  document.addEventListener('mousemove', function () {
+    if (document.body.className.indexOf('mouse') < 0) { document.body.className += ' mouse'; }
+    if (view === 'player' && videoActive()) { showBar(); }
   });
+
+  var wheelAt = 0;
+  $('rows').addEventListener('wheel', function (e) {
+    if (view !== 'home') { return; }
+    var now = Date.now();
+    if (now - wheelAt < 140) { e.preventDefault(); return; }
+    wheelAt = now;
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) { fireKey(e.deltaX > 0 ? KEY.RIGHT : KEY.LEFT); }
+    else if (e.deltaY !== 0) { fireKey(e.deltaY > 0 ? KEY.DOWN : KEY.UP); }
+    e.preventDefault();
+  });
+
+  var goBack = function () { fireKey(KEY.ESC); };
+  ['back-detail', 'back-search', 'back-player', 'back-trailer'].forEach(function (id) { $(id).onclick = goBack; });
+  $('homeback').onclick = function () { leaveResults(); };
+  $('searchbtn').onclick = function () { focus.r = -1; updateFocus(); openSearch(); };
+  $('detail-play').onclick = function () { detailBtn = 0; updateButtons(); play(); };
+  $('detail-trailer').onclick = function () { detailBtn = 1; updateButtons(); openTrailer(); };
+  $('vid').onclick = function () { fireKey(KEY.ENTER); };
+  $('v-rw').onclick = function () { seekBy(-10); showBar(); };
+  $('v-ff').onclick = function () { seekBy(30); showBar(); };
+  $('v-pp').onclick = function () { togglePause(); showBar(); };
+  $('v-asp').onclick = function () { cycleAspect(); showBar(); };
+  $('v-fs').onclick = function () { toggleFullscreen(); };
+  $('vprog').onclick = function (e) {
+    var r = this.getBoundingClientRect();
+    if (vid.duration && r.width) { vid.currentTime = vid.duration * Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); showBar(); }
+  };
 
   try {
     if (window.tizen && tizen.tvinputdevice) {
-      ['MediaPlay', 'MediaPause', 'MediaPlayPause', 'MediaStop', 'MediaFastForward', 'MediaRewind']
+      ['MediaPlay', 'MediaPause', 'MediaPlayPause', 'MediaStop', 'MediaFastForward', 'MediaRewind', 'ColorF2Yellow']
         .forEach(function (n) { try { tizen.tvinputdevice.registerKey(n); } catch (e) {} });
     }
   } catch (e) {}
