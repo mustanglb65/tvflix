@@ -24,6 +24,18 @@ body.mouse .arrow { display: -webkit-flex; display: flex; }
 .vb { display: inline-block; margin-left: 18px; padding: 10px 24px; background: rgba(38,52,95,0.9); border-radius: 8px; font-size: 26px; }
 #vhint { margin-top: 14px; font-size: 20px; color: #9fb0d6; }
 .track-wrap { position: relative; }
+#eps { position: absolute; left: 700px; bottom: 40px; width: 1060px; }
+#eps-seasons { margin-bottom: 10px; white-space: nowrap; overflow: hidden; }
+.chip2 { display: inline-block; margin-right: 12px; padding: 6px 22px; font-size: 24px; background: #1b2a52; border-radius: 8px; border: 3px solid transparent; }
+.chip2.sel { background: #26345f; color: #f2c14e; }
+.chip2.focus { background: #f2c14e; color: #0a1124; font-weight: bold; border-color: #fff; }
+.ep { display: -webkit-flex; display: flex; justify-content: space-between; height: 46px; line-height: 40px; padding: 0 18px; margin-bottom: 4px; font-size: 26px; background: rgba(27,42,82,0.7); border-radius: 8px; border: 3px solid transparent; }
+.ep.focus { background: #f2c14e; color: #0a1124; font-weight: bold; border-color: #fff; }
+.ep-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 800px; }
+.ep-state { color: #9fd79f; font-size: 22px; }
+.ep.focus .ep-state { color: #1c4a1c; }
+#eps-more { margin-top: 4px; font-size: 20px; color: #9fb0d6; text-align: right; }
+body.mouse .ep, body.mouse .chip2 { cursor: pointer; }
 .hidden { display: none !important; }
 
 #topbar { position: absolute; top: 0; left: 0; width: 100%; height: 100px; padding: 30px 80px; background: linear-gradient(#0a1124, rgba(10,17,36,0)); z-index: 5; }

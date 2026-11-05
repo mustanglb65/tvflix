@@ -22,10 +22,21 @@
       "source": "local",
       "items": [
         {
-          "title": "Example: add your own film here",
-          "description": "Replace this entry. Set 'video' to a link to an .mp4 you own, for example on your PC server: http://192.168.0.101:8080/MyFilm.mp4",
+          "title": "Example movie (add yours here)",
+          "description": "Set 'video' to a link to an .mp4 you own, e.g. http://192.168.0.101:8080/MyFilm.mp4",
           "poster": "",
           "video": ""
+        },
+        {
+          "title": "Example series (add yours here)",
+          "description": "A show with seasons and episodes. Every episode needs a 'video' link; episodes with an empty link are hidden.",
+          "poster": "",
+          "seasons": [
+            { "number": 1, "episodes": [
+              { "title": "Pilot", "video": "" },
+              { "title": "Second episode", "video": "" }
+            ] }
+          ]
         }
       ]
     }

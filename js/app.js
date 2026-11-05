@@ -110,7 +110,7 @@
           });
           if (items.length) { list.push({ title: results[i].title, items: items }); }
         }
-        return list;
+        return withContinue(list);
       };
 
       var show = function () {
@@ -182,7 +182,14 @@
             done();
           });
         } else {
-          var items = (row.items || []).filter(function (it) { return it.video; });
+          var items = (row.items || []).filter(function (it) {
+            it.eps = localEps(it);
+            return it.eps.length > 0;
+          });
+          items.forEach(function (it) {
+            for (var q = 0; q < libraryItems.length; q++) { if (itemKey(libraryItems[q]) === itemKey(it)) { return; } }
+            libraryItems.push(it);
+          });
           enrich(items.filter(function (it) { return !it.poster; }), function () {
             results[i] = { title: row.title, items: items };
             done();
@@ -217,7 +224,7 @@
         
         var badge = document.createElement('div');
         badge.className = 'badge';
-        badge.textContent = '▶ STREAM';
+        badge.textContent = it.contLabel || '▶ STREAM';
         card.appendChild(badge);
 
         /* mouse: click a card to open it */
@@ -294,7 +301,7 @@
 
   function leaveResults() {
     if (!homeRows) { return false; }
-    rows = homeRows;
+    rows = withContinue(homeRows);
     homeRows = null;
     setStatus('');
     render();
@@ -406,6 +413,238 @@
   }
 
   var detailBtn = 0;
+  var detailZone = 0;   /* 0 = Play/Trailer buttons, 1 = season row, 2 = episode list */
+  var detailSeason = 1, epIdx = 0, epTop = 0;
+  var playing = null;   /* { item, ep } while a video is playing */
+  var lastSave = 0;
+
+  /* ---- watched / resume progress (kept on this device) ---- */
+  var store = {};
+  try { store = JSON.parse(localStorage.getItem('tvflix.progress') || '{}') || {}; } catch (e) { store = {}; }
+  function saveStore() { try { localStorage.setItem('tvflix.progress', JSON.stringify(store)); } catch (e) {} }
+  function itemKey(it) { return it.archive ? 'a:' + it.id : it.tmdbId ? 't:' + it.tmdbId : 'l:' + it.title; }
+  function getProg(it, epKey) { var r = store[itemKey(it)]; return (r && r.eps && r.eps[epKey]) || null; }
+  function setProg(it, epKey, pos, dur, done) {
+    var k = itemKey(it);
+    var r = store[k] || (store[k] = { eps: {} });
+    var old = r.eps[epKey];
+    r.last = epKey;
+    r.ts = Date.now();
+    r.finished = false;
+    /* remember enough about Internet Archive items to show them in "Continue Watching" next time */
+    if (it.archive) { r.snap = { id: it.id, archive: true, title: it.title, poster: it.poster, year: it.year, description: it.description }; }
+    var ep0 = null;
+    if (it.eps) { for (var q = 0; q < it.eps.length; q++) { if (it.eps[q].key === epKey) { ep0 = it.eps[q]; break; } } }
+    var pct = dur > 0 ? Math.round(pos / dur * 100) : 0;
+    r.label = (ep0 && it.eps.length > 1 ? epLabel(ep0) + ' · ' : '') + pct + '%';
+    r.eps[epKey] = { pos: Math.floor(pos || 0), dur: Math.floor(dur || 0),
+      done: !!(done || (old && old.done) || (dur > 0 && pos / dur > 0.92)) };
+  }
+  function saveProgress(force) {
+    if (!playing || !vid.getAttribute('src')) { return; }
+    var d = vid.duration, t = vid.currentTime;
+    if (!(d > 0) || t < 5) { return; }
+    if (t / d > 0.97 || vid.ended) { return; }   /* the end of an episode is handled by onended */
+    if (!force && Date.now() - lastSave < 5000) { return; }
+    lastSave = Date.now();
+    setProg(playing.item, playing.ep.key, t, d);
+    saveStore();
+  }
+
+  /* ---- episodes: My Library series / multi-file Archive items ---- */
+  function localEps(it) {
+    var eps = [];
+    if (it.seasons) {
+      it.seasons.forEach(function (s, si) {
+        var sn = s.number || si + 1;
+        (s.episodes || []).forEach(function (e, ei) {
+          if (!e.video) { return; }
+          var n = e.number || ei + 1;
+          eps.push({ key: 's' + sn + 'e' + n, season: sn, num: n, title: e.title || ('Episode ' + n), url: e.video });
+        });
+      });
+    } else if (it.video) {
+      eps.push({ key: 'main', season: 1, num: 1, title: it.title, url: it.video });
+    }
+    return eps;
+  }
+
+  function buildEpisodes(it, files) {
+    var rank = { 'h.264': 0, '512Kb MPEG4': 1, 'MPEG4': 2, 'h.264 HD': 3 };
+    var groups = {}, keys = [];
+    files.forEach(function (f) {
+      if (!/\.(mp4|m4v)$/i.test(f.name)) { return; }
+      if ((parseInt(f.size, 10) || 0) < 2 * 1048576) { return; }
+      var key = f.original || f.name;
+      var r = rank[f.format] !== undefined ? rank[f.format] : 9;
+      var g = groups[key];
+      if (!g) { g = groups[key] = { key: key, best: f, rank: r, title: f.title }; keys.push(key); }
+      else {
+        if (!g.title && f.title) { g.title = f.title; }
+        if (r < g.rank || (r === g.rank && (parseInt(f.size, 10) || 0) < (parseInt(g.best.size, 10) || 0))) { g.best = f; g.rank = r; }
+      }
+    });
+    keys.sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true }); });
+    if (!keys.length) { return []; }   /* one file = a single film (still gets resume/watched) */
+    return keys.map(function (k, i) {
+      var g = groups[k];
+      /* nice title: drop the folder, the extension and the "Show - S01E02 -" prefix */
+      var name = (g.title || k).replace(/^.*\//, '').replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[_]+/g, ' ');
+      var tail = name.replace(/^.*?\bs\d{1,2}\s*e\d{1,3}\b[\s\-–:.]*/i, '');
+      if (tail && tail !== name) { name = tail; }
+      name = name.replace(/\s+/g, ' ').trim() || k;
+      var m = k.match(/s(\d{1,2})\s*[ex_.\- ]?\s*e?(\d{1,3})/i) || k.match(/\b(\d{1,2})x(\d{2,3})\b/i);
+      return { key: k, season: m ? parseInt(m[1], 10) : 1, num: m ? parseInt(m[2], 10) : i + 1, title: name,
+        url: ARCHIVE + '/download/' + encodeURIComponent(it.id) + '/' + encodeURIComponent(g.best.name),
+        size: parseInt(g.best.size, 10) || 0 };
+    });
+  }
+
+  /* ---- "Continue Watching" row: everything you started and haven't finished ---- */
+  var libraryItems = [];   /* My Library items (rebuilt from catalog.json every start) */
+  var contCache = {};      /* keeps loaded episode lists for items shown in the row */
+  var contSig = '';
+
+  function continueRow() {
+    var found = [];
+    for (var k in store) {
+      if (!store.hasOwnProperty(k)) { continue; }
+      var r = store[k];
+      if (!r || !r.last || r.finished) { continue; }
+      var base = null;
+      if (k.indexOf('a:') === 0 && r.snap) {
+        /* a private copy, so loaded episode lists never leak into what is saved */
+        if (!contCache[k]) { contCache[k] = {}; for (var sp in r.snap) { contCache[k][sp] = r.snap[sp]; } }
+        base = contCache[k];
+      }
+      else if (k.indexOf('l:') === 0) {
+        for (var i = 0; i < libraryItems.length; i++) { if (itemKey(libraryItems[i]) === k) { base = libraryItems[i]; break; } }
+      }
+      if (!base) { continue; }
+      var c = {};
+      for (var p in base) { if (base.hasOwnProperty(p)) { c[p] = base[p]; } }   /* copy: the label is for this row only */
+      c.contLabel = r.label || 'Continue';
+      found.push({ it: c, ts: r.ts || 0, base: base, k: k });
+    }
+    found.sort(function (a, b) { return b.ts - a.ts; });
+    found = found.slice(0, 15);
+    return found.length ? { title: 'Continue Watching', cont: true, items: found.map(function (f) { return f.it; }) } : null;
+  }
+
+  function contSignature(cr) {
+    return cr ? cr.items.map(function (i) { return itemKey(i) + '|' + i.contLabel; }).join(';') : '';
+  }
+
+  function withContinue(list) {
+    var cr = continueRow();
+    contSig = contSignature(cr);
+    var rest = list.filter(function (r) { return !r.cont; });
+    return cr ? [cr].concat(rest) : rest;
+  }
+
+  /* after leaving a film/episode: update the row (and keep the user's place) only if it changed */
+  function refreshContinue() {
+    if (homeRows) { return; }
+    var cr = continueRow();
+    if (contSignature(cr) === contSig) { return; }
+    var had = rows.length && rows[0].cont;
+    rows = withContinue(rows);
+    var delta = (cr ? 1 : 0) - (had ? 1 : 0);
+    if (focus.r >= 0) { focus.r = Math.max(0, focus.r + delta); }
+    render(true);
+  }
+
+  function epsOf(it) { return (it && it.eps && it.eps.length > 1) ? it.eps : null; }
+  function seasonList(it) {
+    var seen = {}, l = [];
+    it.eps.forEach(function (e) { if (!seen[e.season]) { seen[e.season] = 1; l.push(e.season); } });
+    return l.sort(function (a, b) { return a - b; });
+  }
+  function epsInSeason(it, s) { return it.eps.filter(function (e) { return e.season === s; }); }
+  function epLabel(e) { return 'S' + e.season + ' E' + e.num; }
+
+  function resumeEpisode(it) {
+    var all = it.eps;
+    if (!all || !all.length) { return null; }
+    var r = store[itemKey(it)];
+    if (r && r.last) {
+      for (var i = 0; i < all.length; i++) {
+        if (all[i].key === r.last) {
+          var p = r.eps[r.last];
+          return (p && p.done && i + 1 < all.length) ? all[i + 1] : all[i];
+        }
+      }
+    }
+    return all[0];
+  }
+
+  function renderEpisodes() {
+    var box = $('eps');
+    var all = epsOf(current);
+    if (!all) { box.className = 'hidden'; updateButtons(); return; }
+    box.className = '';
+    var seasons = seasonList(current);
+    var sbox = $('eps-seasons');
+    sbox.innerHTML = '';
+    seasons.forEach(function (s) {
+      var d = document.createElement('span');
+      d.className = 'chip2' + (s === detailSeason ? ' sel' : '') + (detailZone === 1 && s === detailSeason ? ' focus' : '');
+      d.textContent = 'Season ' + s;
+      d.onclick = function () { detailSeason = s; epIdx = 0; epTop = 0; detailZone = 1; renderEpisodes(); };
+      sbox.appendChild(d);
+    });
+    var list = epsInSeason(current, detailSeason);
+    if (epIdx >= list.length) { epIdx = Math.max(0, list.length - 1); }
+    if (epIdx < epTop) { epTop = epIdx; }
+    if (epIdx >= epTop + 5) { epTop = epIdx - 4; }
+    var lbox = $('eps-list');
+    lbox.innerHTML = '';
+    for (var i = epTop; i < Math.min(list.length, epTop + 5); i++) {
+      (function (i) {
+        var ep = list[i], p = getProg(current, ep.key);
+        var row = document.createElement('div');
+        row.className = 'ep' + (detailZone === 2 && i === epIdx ? ' focus' : '');
+        var left = document.createElement('span');
+        left.className = 'ep-title';
+        left.textContent = 'E' + ep.num + '   ' + ep.title;
+        var right = document.createElement('span');
+        right.className = 'ep-state';
+        right.textContent = (p && p.done) ? '✓ Watched' : (p && p.pos > 10 && p.dur ? Math.round(p.pos / p.dur * 100) + '%' : '');
+        row.appendChild(left);
+        row.appendChild(right);
+        row.onclick = function () { epIdx = i; detailZone = 2; renderEpisodes(); playEpisode(ep); };
+        lbox.appendChild(row);
+      })(i);
+    }
+    $('eps-more').textContent = list.length + ' episodes' + (epTop > 0 ? '  ▲' : '') +
+      (epTop + 5 < list.length ? '  ▼' : '');
+    updateButtons();
+  }
+
+  function setupEps() {
+    var all = epsOf(current);
+    if (all) {
+      var r = resumeEpisode(current);
+      detailSeason = r.season;
+      var list = epsInSeason(current, detailSeason);
+      epIdx = Math.max(0, list.indexOf(r));
+      epTop = 0;
+    }
+    detailZone = 0;
+    renderEpisodes();
+  }
+
+  function loadArchiveEps(it) {
+    if (it.eps) { return; }
+    if (it._epsLoading) { return; }
+    it._epsLoading = true;
+    get(ARCHIVE + '/metadata/' + encodeURIComponent(it.id), function (err, meta) {
+      it._epsLoading = false;
+      if (err || !meta || !meta.files) { return; }
+      it.eps = buildEpisodes(it, meta.files);
+      if (current === it && view === 'detail') { setupEps(); }
+    });
+  }
 
   function visibleButtons() {
     var list = [];
@@ -419,7 +658,16 @@
     $('detail-play').className = 'btn hidden';
     $('detail-trailer').className = 'btn hidden';
     if (detailBtn >= list.length) { detailBtn = 0; }
-    list.forEach(function (b, i) { b.el.className = 'btn' + (i === detailBtn ? ' focus' : ''); });
+    list.forEach(function (b, i) { b.el.className = 'btn' + (i === detailBtn && detailZone === 0 ? ' focus' : ''); });
+    /* the Play button says what it will play: Play / Continue S1 E3 / Resume 12:03 */
+    var lab = '▶ Play';
+    if (current && current.eps && current.eps.length) {
+      var re = resumeEpisode(current), p = re && getProg(current, re.key);
+      var partial = p && !p.done && p.pos > 10;
+      if (current.eps.length > 1) { lab = (partial ? '▶ Continue ' : '▶ Play ') + epLabel(re); }
+      else if (partial) { lab = '▶ Resume ' + fmt(p.pos); }
+    }
+    $('detail-play').textContent = lab;
   }
 
   function renderWhere(item) {
@@ -428,7 +676,7 @@
     if (!item) { return; }
     var d = document.createElement('div');
     d.className = 'where-free';
-    d.textContent = item.archive ? '▶ Free to watch (public domain) - press Play'
+    d.textContent = item.archive ? '▶ From the Internet Archive - press Play'
       : item.video ? '▶ From your library - press Play'
       : '▶ Ready to stream instantly via VidCore Player (Press Play)';
     box.appendChild(d);
@@ -441,10 +689,12 @@
       (current.description || 'No description available.');
     $('detail-poster').style.backgroundImage = current.poster ? 'url(' + current.poster + ')' : 'none';
     detailBtn = 0;
+    detailZone = 0;
     renderWhere(current);
-    updateButtons();
     $('detail').className = '';
     view = 'detail';
+    setupEps();                                   /* episode picker for series (hidden for single films) */
+    if (current.archive) { loadArchiveEps(current); }
 
     /* free films: fetch the nicer poster/description from TMDB once, only for the film you opened */
     if (current.archive && !current.enriched && TMDB_KEY) {
@@ -490,7 +740,7 @@
     try { window.focus(); } catch (e) {}
   }
 
-  function closeDetail() { $('detail').className = 'hidden'; view = 'home'; }
+  function closeDetail() { $('detail').className = 'hidden'; view = 'home'; refreshContinue(); }
 
   function showMsg(t, keep) {
     var m = $('player-msg');
@@ -555,8 +805,8 @@
     barTimer = setTimeout(function () { if (!vid.paused) { $('vbar').className = 'hidden'; } }, 4000);
   }
 
-  vid.addEventListener('timeupdate', updateBar);
-  vid.addEventListener('pause', function () { updateBar(); showBar(); });
+  vid.addEventListener('timeupdate', function () { updateBar(); saveProgress(false); });
+  vid.addEventListener('pause', function () { updateBar(); showBar(); saveProgress(true); });
   vid.addEventListener('play', function () { updateBar(); showBar(); });
 
   function toggleFullscreen() {
@@ -567,7 +817,46 @@
     } catch (e) {}
   }
 
-  function playVideo(url, sizeBytes, token) {
+  function playEpisode(ep) {
+    var item = current;
+    $('player').className = '';
+    view = 'player';
+    playing = { item: item, ep: ep };
+    var token = ++playToken;
+    vid.className = 'hidden';
+    var p = getProg(item, ep.key);
+    var start = (p && !p.done) ? p.pos : 0;
+    if (!ep.url) { showMsg('This episode has no video link. Press Back.', true); return; }
+    playVideo(ep.url, ep.size || 0, token, start);
+  }
+
+  function playVideo(url, sizeBytes, token, startPos) {
+    vid.onloadedmetadata = function () {
+      if (token === playToken && startPos > 10 && vid.duration && startPos < vid.duration - 30) {
+        try { vid.currentTime = startPos; showMsg('Resuming at ' + fmt(startPos)); } catch (e) {}
+      }
+    };
+    /* when an episode ends: mark it watched and roll on to the next one */
+    vid.onended = function () {
+      if (token !== playToken || !playing) { return; }
+      var item = playing.item, ep = playing.ep;
+      setProg(item, ep.key, vid.duration, vid.duration, true);
+      saveStore();
+      var list = item.eps || [], next = null;
+      for (var i = 0; i < list.length; i++) { if (list[i].key === ep.key) { next = list[i + 1] || null; break; } }
+      var rec = store[itemKey(item)];
+      if (rec) { rec.finished = !next; rec.label = next ? 'Up next · ' + epLabel(next) : ''; saveStore(); }
+      if (next) {
+        showMsg('Next: ' + epLabel(next) + '  ' + next.title, true);
+        setTimeout(function () {
+          if (view === 'player' && token === playToken) {
+            detailSeason = next.season;
+            epIdx = Math.max(0, epsInSeason(item, next.season).indexOf(next));
+            playEpisode(next);
+          }
+        }, 2000);
+      } else { stop(); }
+    };
     vid.onerror = function () {
       if (token === playToken) { showMsg('This video could not be played on this device. Press Back.', true); }
     };
@@ -600,7 +889,7 @@
     playToken++;
     try { vid.pause(); } catch (e) {}
     vid.removeAttribute('src');
-    vid.onerror = vid.onplaying = vid.onwaiting = vid.oncanplay = null;
+    vid.onerror = vid.onplaying = vid.onwaiting = vid.oncanplay = vid.onloadedmetadata = vid.onended = null;
     try { vid.load(); } catch (e) {}
     vid.className = 'hidden';
     $('vbar').className = 'hidden';
@@ -635,6 +924,7 @@
   function play() {
     $('player').className = '';
     view = 'player';
+    if (current.eps && current.eps.length) { playEpisode(resumeEpisode(current)); return; }
     if (current.archive) { playArchive(current); return; }
     if (current.video) { playVideo(current.video, 0, ++playToken); return; }
     var type = (current.kind === 'tv') ? 'tv' : 'movie';
@@ -651,11 +941,15 @@
   }
 
   function stop() {
+    saveProgress(true);
+    playing = null;
     stopVideo();
     vidcoreFrame.src = 'about:blank';
     $('player').className = 'hidden';
     $('detail').className = '';
     view = 'detail';
+    detailZone = 0;
+    renderEpisodes();   /* refresh the watched marks and the Play button label */
   }
 
   var KEY = { LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, ENTER: 13, BACK: 10009, ESC: 27, BKSP: 8,
@@ -687,11 +981,27 @@
 
     if (view === 'detail') {
       var btns = visibleButtons();
+      var multi = !!epsOf(current);
+      var nSeasons = multi ? seasonList(current).length : 0;
       if (isBack(k)) { closeDetail(); }
-      else if (k === KEY.LEFT && detailBtn > 0) { detailBtn--; updateButtons(); }
-      else if (k === KEY.RIGHT && detailBtn < btns.length - 1) { detailBtn++; updateButtons(); }
-      else if (k === KEY.ENTER && btns[detailBtn]) {
-        if (btns[detailBtn].act === 'play') { play(); } else { openTrailer(); }
+      else if (detailZone === 0) {
+        if (k === KEY.LEFT && detailBtn > 0) { detailBtn--; updateButtons(); }
+        else if (k === KEY.RIGHT && detailBtn < btns.length - 1) { detailBtn++; updateButtons(); }
+        else if (k === KEY.DOWN && multi) { detailZone = nSeasons > 1 ? 1 : 2; renderEpisodes(); }
+        else if (k === KEY.ENTER && btns[detailBtn]) {
+          if (btns[detailBtn].act === 'play') { play(); } else { openTrailer(); }
+        }
+      } else if (detailZone === 1) {
+        var sl = seasonList(current), si = sl.indexOf(detailSeason);
+        if (k === KEY.LEFT && si > 0) { detailSeason = sl[si - 1]; epIdx = 0; epTop = 0; renderEpisodes(); }
+        else if (k === KEY.RIGHT && si < sl.length - 1) { detailSeason = sl[si + 1]; epIdx = 0; epTop = 0; renderEpisodes(); }
+        else if (k === KEY.UP) { detailZone = 0; renderEpisodes(); }
+        else if (k === KEY.DOWN || k === KEY.ENTER) { detailZone = 2; renderEpisodes(); }
+      } else {
+        var elist = epsInSeason(current, detailSeason);
+        if (k === KEY.UP) { if (epIdx > 0) { epIdx--; } else { detailZone = nSeasons > 1 ? 1 : 0; } renderEpisodes(); }
+        else if (k === KEY.DOWN && epIdx < elist.length - 1) { epIdx++; renderEpisodes(); }
+        else if (k === KEY.ENTER && elist[epIdx]) { playEpisode(elist[epIdx]); }
       }
       e.preventDefault();
       return;
@@ -766,7 +1076,7 @@
   ['back-detail', 'back-search', 'back-player', 'back-trailer'].forEach(function (id) { $(id).onclick = goBack; });
   $('homeback').onclick = function () { leaveResults(); };
   $('searchbtn').onclick = function () { focus.r = -1; updateFocus(); openSearch(); };
-  $('detail-play').onclick = function () { detailBtn = 0; updateButtons(); play(); };
+  $('detail-play').onclick = function () { detailBtn = 0; detailZone = 0; updateButtons(); play(); };
   $('detail-trailer').onclick = function () { detailBtn = 1; updateButtons(); openTrailer(); };
   $('vid').onclick = function () { fireKey(KEY.ENTER); };
   $('v-rw').onclick = function () { seekBy(-10); showBar(); };
