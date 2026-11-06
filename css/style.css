@@ -67,7 +67,7 @@ body.mouse .ep, body.mouse .chip2 { cursor: pointer; }
 .where-label { display: inline-block; width: 230px; color: #9fb0d6; vertical-align: middle; }
 .chip { display: inline-block; vertical-align: middle; margin: 4px 10px 4px 0; padding: 6px 16px 6px 6px; background: #1b2a52; border-radius: 10px; font-size: 22px; }
 .chip img { width: 44px; height: 44px; border-radius: 8px; margin-right: 10px; vertical-align: middle; }
-#detail-buttons .btn { margin-right: 24px; }
+#detail-buttons .btn { margin-right: 16px; padding: 16px 28px; font-size: 28px; }
 
 #trailer { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; background: #000; z-index: 15; }
 #trailer-frame { width: 1920px; height: 1080px; border: 0; }

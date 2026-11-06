@@ -391,8 +391,8 @@
         track.style.webkitTransform = track.style.transform = 'translateX(-' + off + 'px)';
       }
       /* load posters only for rows near the screen and cards near the visible part of the row */
-      if (Math.abs(r - Math.max(focus.r, 0)) <= 2) {
-        for (var k = Math.max(0, c - 1); k < Math.min(cards.length, c + 10); k++) {
+      if (Math.abs(r - Math.max(focus.r, 0)) <= 1) {
+        for (var k = Math.max(0, c - 1); k < Math.min(cards.length, c + 8); k++) {
           var cd = cards[k];
           if (!cd._loaded) {
             cd._loaded = true;
@@ -470,19 +470,15 @@
   }
 
   function buildEpisodes(it, files) {
-    var rank = { 'h.264': 0, '512Kb MPEG4': 1, 'MPEG4': 2, 'h.264 HD': 3 };
     var groups = {}, keys = [];
     files.forEach(function (f) {
       if (!/\.(mp4|m4v)$/i.test(f.name)) { return; }
       if ((parseInt(f.size, 10) || 0) < 2 * 1048576) { return; }
       var key = f.original || f.name;
-      var r = rank[f.format] !== undefined ? rank[f.format] : 9;
       var g = groups[key];
-      if (!g) { g = groups[key] = { key: key, best: f, rank: r, title: f.title }; keys.push(key); }
-      else {
-        if (!g.title && f.title) { g.title = f.title; }
-        if (r < g.rank || (r === g.rank && (parseInt(f.size, 10) || 0) < (parseInt(g.best.size, 10) || 0))) { g.best = f; g.rank = r; }
-      }
+      if (!g) { g = groups[key] = { key: key, files: [], title: f.title }; keys.push(key); }
+      g.files.push(f);                       /* all versions of this episode; the quality setting picks one at play time */
+      if (!g.title && f.title) { g.title = f.title; }
     });
     keys.sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true }); });
     if (!keys.length) { return []; }   /* one file = a single film (still gets resume/watched) */
@@ -495,8 +491,7 @@
       name = name.replace(/\s+/g, ' ').trim() || k;
       var m = k.match(/s(\d{1,2})\s*[ex_.\- ]?\s*e?(\d{1,3})/i) || k.match(/\b(\d{1,2})x(\d{2,3})\b/i);
       return { key: k, season: m ? parseInt(m[1], 10) : 1, num: m ? parseInt(m[2], 10) : i + 1, title: name,
-        url: ARCHIVE + '/download/' + encodeURIComponent(it.id) + '/' + encodeURIComponent(g.best.name),
-        size: parseInt(g.best.size, 10) || 0 };
+        cands: g.files, archiveId: it.id };
     });
   }
 
@@ -650,6 +645,7 @@
     var list = [];
     if (current) { list.push({ el: $('detail-play'), act: 'play' }); }
     if (current && current.trailer) { list.push({ el: $('detail-trailer'), act: 'trailer' }); }
+    if (current && current.archive) { list.push({ el: $('detail-quality'), act: 'quality' }); }
     return list;
   }
 
@@ -657,6 +653,8 @@
     var list = visibleButtons();
     $('detail-play').className = 'btn hidden';
     $('detail-trailer').className = 'btn hidden';
+    $('detail-quality').className = 'btn hidden';
+    $('detail-quality').textContent = 'Quality: ' + (quality === 'low' ? 'Low (faster)' : 'High');
     if (detailBtn >= list.length) { detailBtn = 0; }
     list.forEach(function (b, i) { b.el.className = 'btn' + (i === detailBtn && detailZone === 0 ? ' focus' : ''); });
     /* the Play button says what it will play: Play / Continue S1 E3 / Resume 12:03 */
@@ -753,19 +751,41 @@
      (archive.org's embed page needs a modern browser and hangs on older TVs.) */
   var vid = $('vid');
   var playToken = 0;
+  var loadTimer = null;
 
-  function pickArchiveFile(files) {
-    /* smaller files first: they start sooner and buffer less on a slow connection */
-    var order = ['h.264', '512Kb MPEG4', 'MPEG4', 'h.264 HD'];
-    for (var i = 0; i < order.length; i++) {
-      for (var j = 0; j < files.length; j++) {
-        if (files[j].format === order[i] && /\.(mp4|m4v)$/i.test(files[j].name)) { return files[j]; }
+  /* Video quality for Internet Archive films. "Low" uses the small 512Kb version when a film has one:
+     it starts much sooner on a slow connection or an old TV. Old Tizen TVs (3.0 / 4.0) default to Low. */
+  var QUALITY_ORDER = {
+    low:  ['512Kb MPEG4', 'h.264', 'MPEG4', 'h.264 HD'],
+    high: ['h.264', 'MPEG4', 'h.264 HD', '512Kb MPEG4']
+  };
+  var quality = 'high';
+  (function () {
+    var m = (navigator.userAgent || '').match(/Tizen[ \/](\d+)/);
+    if (m && parseInt(m[1], 10) <= 4) { quality = 'low'; }
+    try { var q = localStorage.getItem('tvflix.quality'); if (q === 'low' || q === 'high') { quality = q; } } catch (e) {}
+  })();
+
+  function chooseFile(files) {
+    var order = QUALITY_ORDER[quality], mp4 = /\.(mp4|m4v)$/i, i, j;
+    for (i = 0; i < order.length; i++) {
+      for (j = 0; j < files.length; j++) {
+        if (files[j].format === order[i] && mp4.test(files[j].name)) { return files[j]; }
       }
     }
-    for (var k = 0; k < files.length; k++) {
-      if (/\.(mp4|m4v)$/i.test(files[k].name)) { return files[k]; }
+    var best = null;   /* no known format: take the smallest mp4 */
+    for (j = 0; j < files.length; j++) {
+      if (!mp4.test(files[j].name)) { continue; }
+      if (!best || (parseInt(files[j].size, 10) || 0) < (parseInt(best.size, 10) || 0)) { best = files[j]; }
     }
-    return null;
+    return best;
+  }
+  function pickArchiveFile(files) { return chooseFile(files); }
+
+  function toggleQuality() {
+    quality = (quality === 'low') ? 'high' : 'low';
+    try { localStorage.setItem('tvflix.quality', quality); } catch (e) {}
+    updateButtons();
   }
 
   /* ---- screen modes for the video player: Fit / Fill / Stretch / Zoom ---- */
@@ -826,8 +846,16 @@
     vid.className = 'hidden';
     var p = getProg(item, ep.key);
     var start = (p && !p.done) ? p.pos : 0;
-    if (!ep.url) { showMsg('This episode has no video link. Press Back.', true); return; }
-    playVideo(ep.url, ep.size || 0, token, start);
+    var url = ep.url, size = ep.size || 0;
+    if (ep.cands) {                                     /* Internet Archive: choose the version by quality */
+      var f = chooseFile(ep.cands);
+      if (f) {
+        url = ARCHIVE + '/download/' + encodeURIComponent(ep.archiveId) + '/' + encodeURIComponent(f.name);
+        size = parseInt(f.size, 10) || 0;
+      }
+    }
+    if (!url) { showMsg('This episode has no video link. Press Back.', true); return; }
+    playVideo(url, size, token, start);
   }
 
   function playVideo(url, sizeBytes, token, startPos) {
@@ -858,16 +886,35 @@
       } else { stop(); }
     };
     vid.onerror = function () {
-      if (token === playToken) { showMsg('This video could not be played on this device. Press Back.', true); }
+      if (token !== playToken) { return; }
+      clearInterval(loadTimer);
+      var code = vid.error ? vid.error.code : '?';
+      showMsg('This video could not be played (error ' + code + '). ' +
+        (code === 4 || code === 3 ? 'Try Quality: Low on the film page. ' : 'Check the connection. ') + 'Press Back.', true);
     };
-    vid.onplaying = function () { if (token === playToken) { showMsg(''); } };
+    vid.onplaying = function () { if (token === playToken) { clearInterval(loadTimer); showMsg(''); } };
     vid.onwaiting = function () { if (token === playToken) { showMsg('Buffering...', true); } };
     vid.oncanplay = function () { if (token === playToken && !vid.paused) { showMsg(''); } };
     vid.src = url;
     vid.className = '';
     applyAspect();
     showBar();
-    showMsg('Loading' + (sizeBytes ? ' (' + Math.round(sizeBytes / 1048576) + ' MB)' : '') + '...', true);
+    var sizeTxt = sizeBytes ? ' (' + Math.round(sizeBytes / 1048576) + ' MB, ' + quality + ' quality)' : '';
+    showMsg('Loading' + sizeTxt + '...', true);
+    /* live "Loading 12s - buffered 3%" so a slow start is visible, not a frozen screen */
+    var t0 = Date.now();
+    clearInterval(loadTimer);
+    loadTimer = setInterval(function () {
+      if (token !== playToken) { clearInterval(loadTimer); return; }
+      if (vid.readyState >= 3) { clearInterval(loadTimer); showMsg(''); return; }   /* ready (playing or waiting for OK) */
+      var s = Math.round((Date.now() - t0) / 1000), b = '';
+      try {
+        if (vid.buffered.length && vid.duration) {
+          b = ' - buffered ' + Math.round(vid.buffered.end(vid.buffered.length - 1) / vid.duration * 100) + '%';
+        }
+      } catch (e) {}
+      showMsg('Loading' + sizeTxt + ' ' + s + 's' + b + (s > 30 ? ' - slow? try Quality: Low on the film page' : ''), true);
+    }, 1000);
     var p = vid.play();
     if (p && p.catch) { p.catch(function () {}); }
   }
@@ -886,6 +933,7 @@
   }
 
   function stopVideo() {
+    clearInterval(loadTimer);
     playToken++;
     try { vid.pause(); } catch (e) {}
     vid.removeAttribute('src');
@@ -989,7 +1037,8 @@
         else if (k === KEY.RIGHT && detailBtn < btns.length - 1) { detailBtn++; updateButtons(); }
         else if (k === KEY.DOWN && multi) { detailZone = nSeasons > 1 ? 1 : 2; renderEpisodes(); }
         else if (k === KEY.ENTER && btns[detailBtn]) {
-          if (btns[detailBtn].act === 'play') { play(); } else { openTrailer(); }
+          var act = btns[detailBtn].act;
+          if (act === 'play') { play(); } else if (act === 'quality') { toggleQuality(); } else { openTrailer(); }
         }
       } else if (detailZone === 1) {
         var sl = seasonList(current), si = sl.indexOf(detailSeason);
@@ -1049,7 +1098,10 @@
     if (!w || !h) { return; } /* window hidden or not laid out yet */
     var s = Math.min(w / 1920, h / 1080);
     var x = (w - 1920 * s) / 2, y = (h - 1080 * s) / 2;
-    var t = 'translate(' + x + 'px,' + y + 'px) scale(' + s + ')';
+    /* On a 1920x1080 TV no scaling is needed: skip the transform entirely, because a transform
+       forces the whole screen into a GPU layer, which is slow on old TVs. */
+    var t = (Math.abs(s - 1) < 0.001 && Math.abs(x) < 1 && Math.abs(y) < 1) ? '' :
+      'translate(' + x + 'px,' + y + 'px) scale(' + s + ')';
     appEl.style.webkitTransform = appEl.style.transform = t;
   }
   window.addEventListener('resize', fit);
@@ -1078,6 +1130,7 @@
   $('searchbtn').onclick = function () { focus.r = -1; updateFocus(); openSearch(); };
   $('detail-play').onclick = function () { detailBtn = 0; detailZone = 0; updateButtons(); play(); };
   $('detail-trailer').onclick = function () { detailBtn = 1; updateButtons(); openTrailer(); };
+  $('detail-quality').onclick = function () { toggleQuality(); };
   $('vid').onclick = function () { fireKey(KEY.ENTER); };
   $('v-rw').onclick = function () { seekBy(-10); showBar(); };
   $('v-ff').onclick = function () { seekBy(30); showBar(); };
